@@ -74,31 +74,27 @@ function removePlayer(p) {
     if (!p || !p.room) return;
     const room = p.room;
 
-    // 1. 방의 플레이어 목록에서 이 유저를 확실하게 삭제
+    // 1. 방의 플레이어 목록에서 삭제
     room.players.delete(p.id);
 
-    // 2. 이 방에 남아있는 다른 모든 사람들에게 "이 사람이 나갔다"고 즉시 알림
-    broadcastRoom(room, { type: 'left', id: p.id });
+    // 2. 남은 사람들에게 퇴장 소식 전송 (broadcast 함수 사용)
+    broadcast(room, 'left', { id: p.id });
 
-    // 3. 방에 아무도 남지 않았으면 방 자체를 서버 메모리에서 폭파(삭제)
+    // 3. 방에 아무도 없으면 방 폭파
     if (room.players.size === 0) {
         rooms.delete(room.code);
     }
-    // 4. 만약 나간 사람이 방장(Host)이었다면, 남은 사람 중 첫 번째 사람에게 방장 권한 자동 위임
+    // 4. 방장이 나갔으면 권한 위임
     else if (room.host === p.id) {
         room.host = room.players.keys().next().value;
     }
 
-    // 5. 방의 최신 상태를 남은 사람들에게 전송해서 로비 화면 즉시 갱신
+    // 5. 로비 화면 갱신
     pushRoom(room);
 
-    // 6. 플레이어 객체의 방 정보 초기화
     p.room = null;
     p.ready = false;
-}
-
-// ---------------- 경기 ----------------
-function startRace(room) {
+} function startRace(room) {
     const s = room.settings;
     if (!MAP_CP[s.mapId]) s.mapId = 'sunset';
     if (room.race) { clearTimeout(room.race.dnfTimer); clearTimeout(room.race.goTimer); }
@@ -225,26 +221,9 @@ wss.on('connection', (ws) => {
                 send(ws, 'joined', { id: p.id, code: r.code }); pushRoom(r); break;
             }
             case 'ready': if (room && room.state === 'lobby') { p.ready = !!m.ready; pushRoom(room); } break;
-            case 'left': {
-                console.log("플레이어 퇴장:", m.id); // 확인용 로그
-
-                // 1. 인게임(레이싱 중)일 때 화면에서 자동차 삭제
-                // ⚠ 주의: 'remotePlayers'라는 변수명은 실제 님의 코드에서 상대방 차들을 저장하는 
-                // 배열이나 객체 이름(예: opponents, otherCars 등)으로 바꿔야 합니다.
-                if (typeof remotePlayers !== 'undefined' && remotePlayers[m.id]) {
-                    // Three.js 씬(Scene)에서 해당 유저의 3D 자동차 모델 제거
-                    if (remotePlayers[m.id].mesh) {
-                        scene.remove(remotePlayers[m.id].mesh);
-                    }
-                    // 메모리(객체)에서 해당 유저 데이터 완전 삭제
-                    delete remotePlayers[m.id];
-                }
-
-                // 2. 만약 UI(순위표 등)를 다시 그려야 한다면 여기서 관련 함수 호출
-                // 예: updateLeaderboard();
-
+            case 'left':
+                removePlayer(p);
                 break;
-            }
             case 'settings': {
                 if (!host || room.state !== 'lobby') break;
                 if (LAP_CHOICES.includes(+m.laps)) room.settings.laps = +m.laps;
