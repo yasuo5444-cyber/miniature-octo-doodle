@@ -251,17 +251,31 @@ function showResults(m) {
 // ---------- 차량 ----------
 function clearCars() { for (const c of app.cars.values()) { scene.remove(c.group); c.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); } app.cars.clear(); }
 function spawnCar(p) {
-    // p.slot 대신 p.grid 를 사용하여 위치를 랜덤으로 배정합니다.
-    const sp = app.track.spawn(p.grid), car = buildCar(p.color), local = p.id === app.me.id;
-    car.group.position.set(sp.x, sp.y, sp.z); car.group.rotation.y = sp.a;
+    // 1. 내 아이디 판별 (객체나 숫자 등 어떤 형태든 안전하게 캐치)
+    const myId = (typeof app.me === 'object' ? app.me?.id : app.me) ?? app.myId;
+    const local = p.id === myId;
+
+    // 2. 맵의 시작 그리드 위치 가져오기 (위치가 고정되지 않고 순서/랜덤에 따라 배치됨)
+    const sp = app.track.spawn(p.grid), car = buildCar(p.color);
+    car.group.position.set(sp.x, sp.y, sp.z);
+    car.group.rotation.y = sp.a;
 
     const c = { id: p.id, name: p.name, color: p.color, ...car, local, target: null, hasTarget: false, x: sp.x, y: sp.y, z: sp.z, a: sp.a, v: 0, pitch: 0, hint: sp.i };
-    if (!local) { const spr = makeNameSprite(p.name, p.color); spr.position.y = 2.8; car.group.add(spr); }
-    scene.add(car.group); app.cars.set(p.id, c);
 
-    if (local) app.local = { x: sp.x, y: sp.y, z: sp.z, vx: 0, vz: 0, vy: 0, a: sp.a, hint: sp.i, n: null, airborne: false, airTime: 0, drifting: false, slip: 0, nitro: 0, nitroOn: false, padBoost: 0, padLast: null, wrong: 0, shake: 0, camYaw: sp.a, offRoad: false, speed: 0, fs: 0, steerVis: 0, pitchTarget: 0, landBurst: 0 };
+    if (!local) {
+        const spr = makeNameSprite(p.name, p.color);
+        spr.position.y = 2.8;
+        car.group.add(spr);
+    }
+
+    scene.add(car.group);
+    app.cars.set(p.id, c);
+
+    // 3. 내 차일 경우 app.local에 장착하여 카메라와 조작이 붙도록 설정
+    if (local) {
+        app.local = { x: sp.x, y: sp.y, z: sp.z, vx: 0, vz: 0, vy: 0, a: sp.a, hint: sp.i, n: null, airborne: false, airTime: 0, drifting: false, slip: 0, nitro: 0, nitroOn: false, padBoost: 0, padLast: null, wrong: 0, shake: 0, camYaw: sp.a, off: 0 };
+    }
 }
-
 // ---------- 입력 ----------
 const keys = {}, touch = { up: 0, down: 0, left: 0, right: 0, drift: 0, nitro: 0 };
 const input = { ...NO_INPUT };
