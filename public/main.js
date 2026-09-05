@@ -460,7 +460,7 @@ function updateLocalVisual(dt) {
   c.pitch += (L.pitchTarget - c.pitch) * Math.min(1, dt * 6);
   c.group.rotation.set(c.pitch, L.a, -L.steerVis * 0.06 * Math.min(1, L.speed / 25));
   animateCar(c, dt, L.fs, L.steerVis, L.nitroOn, input.down && L.fs > 0.5);
-  const fX = Math.sin(L.a), fZ = Math.cos(L.a), rX = -f
+    const fX = Math.sin(L.a), fZ = Math.cos(L.a), rX = -fZ, rZ = fX, R = () => Math.random() - 0.5
   , rZ = fX, R = () => Math.random() - 0.5;
   if (!L.airborne && L.speed > 6) {
     if (L.drifting && L.slip > 0.12) for (const s of [-1, 1]) if (Math.random() < 0.7) particles.emit(L.x + rX * s * 0.9 - fX * 1.4, L.y + 0.2, L.z + rZ * s * 0.9 - fZ * 1.4, R() * 2, 0.8, R() * 2, 0.85, 0.85, 0.88, 0.9);
