@@ -530,13 +530,15 @@ function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     if (!app.track) return;
 
-    // 👇 phase가 'enter'나 'lobby'일 때만 맵 전체를 비추는 로비 카메라가 돌게 해야 합니다!
-    if (app.phase === 'enter' || app.phase === 'lobby') {
-        lobbyCamera(now / 1000); sfx.setEngine(0, false, false); sfx.setSkid(false, 0); sfx.setNitro(false);
-        renderer.render(scene, camera); return;
+    // 1. 대기실(로비)이나 결과 화면일 때만 맵 전체를 비추는 로비 카메라 작동
+    if (app.phase === 'enter' || app.phase === 'lobby' || app.phase === 'results') {
+        lobbyCamera(now / 1000);
+        sfx.setEngine(0, false, false); sfx.setSkid(false, 0); sfx.setNitro(false);
+        renderer.render(scene, camera);
+        return;
     }
 
-    // 경기가 시작(카운트다운 또는 레이싱)되면 로비 카메라를 멈추고 내 차를 비추는 updateCamera가 작동합니다.
+    // 2. 경기가 시작(카운트다운 또는 레이싱 중)되면 내 차를 조작하고 카메라가 쫓아감!
     readInput();
     const control = app.phase === 'racing' && !app.finished;
     if (app.local) {
@@ -544,13 +546,17 @@ function frame(now) {
         for (let i = 0; i < steps; i++) stepLocal(h, control);
         updateLocalVisual(dt);
         sendAcc += dt; if (sendAcc >= 1 / 15 && app.phase !== 'results') { sendAcc = 0; sendState(); }
-        sfx.setEngine(app.local.speed, control && input.up, app.local.nitroOn); sfx.setSkid(app.local.drifting && app.local.slip > 0.1, app.local.slip); sfx.setNitro(app.local.nitroOn);
+        sfx.setEngine(app.local.speed, control && input.up, app.local.nitroOn);
+        sfx.setSkid(app.local.drifting && app.local.slip > 0.1, app.local.slip);
+        sfx.setNitro(app.local.nitroOn);
     }
-    updateRemote(dt); particles.update(dt); updateCamera(dt); // 👈 여기서 내 차를 쫓는 카메라가 실행됨
-  if (app.track.padMat) app.track.padMat.color.setHSL(0.52, 1, 0.75 + Math.sin(now / 120) * 0.2);
-  hudAcc += dt; if (hudAcc > 0.1) { hudAcc = 0; updateHud(); }
-  drawMinimap();
-  renderer.render(scene, camera);
+    updateRemote(dt);
+    particles.update(dt);
+
+    // 👇 핵심: 이 함수가 실행되어야 카메라가 내 차 뒤로 찰싹 붙습니다!
+    updateCamera(dt);
+
+    renderer.render(scene, camera);
 }
 
 // ---------- 시작 ----------
