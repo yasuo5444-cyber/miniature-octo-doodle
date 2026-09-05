@@ -10,7 +10,7 @@ const TICK_MS = 66;            // 상태 브로드캐스트 15Hz
 const COUNTDOWN_MS = 3800;     // race_start → go
 const DNF_MS = 60000;          // 1등 완주 후 나머지 대기 시간
 const LAP_CHOICES = [1, 2, 3, 5];
-const COLORS = ['#ff4b4b', '#3fa9ff', '#ffd23f', '#4bff8a'];
+const COLORS = ['#ff4b4b', '#ff8c2a', '#ffd23f', '#4bff8a', '#2ad4b0', '#3fa9ff','#7d5cff', '#ff5cc8', '#ffffff', '#9aa3ad', '#3b3f45', '#c8a45a'];
 // ⚠ public/maps.js 의 cp 값과 반드시 동일해야 함
 const MAP_CP = { sunset: 12, harbor: 18, mountain: 16, canyon: 20, random: 12 };
 
@@ -48,9 +48,9 @@ function createRoom() {
   return room;
 }
 function addPlayer(room, p) {
-  const used = new Set([...room.players.values()].map(q => q.slot));
+    const usedC = new Set([...room.players.values()].map(q => q.color));
+    p.color = COLORS.find(c => !usedC.has(c)) || COLORS[p.slot];
   p.slot = [0, 1, 2, 3].find(s => !used.has(s));
-  p.color = COLORS[p.slot]; p.ready = false; p.state = null; p.room = room;
   room.players.set(p.id, p);
   if (room.host === null) room.host = p.id;
 }
@@ -65,7 +65,8 @@ function removePlayer(p) {
   if (room.players.size === 0) { destroyRoom(room); return; }
   if (room.host === p.id) room.host = room.players.keys().next().value;
   broadcast(room, 'left', { id: p.id });
-  if (room.race) { room.race.prog.delete(p.id); if (room.state === 'racing') checkAllFinished(room); }
+    if (room.race) { room.race.prog.delete(p.id); if (room.state === 'racing') checkAllFinished(room); }
+    if (room.race && room.state === 'racing') tickRoom(room);
   pushRoom(room);
 }
 
@@ -82,10 +83,16 @@ function startRace(room) {
     p.ready = false; p.state = null;
     prog.set(p.id, { nextCp: 1, lap: 0, lapStart: t0, laps: [], best: null, finished: false, finishTime: null, t: 0 });
   }
-  room.race = { t0, cp: MAP_CP[s.mapId], prog, finishOrder: [], dnfTimer: null, goTimer: null };
+    room.race = { t0, cp: MAP_CP[s.mapId], prog, finishOrder: [], dnfTimer: null, goTimer: null };
+    const order = [...room.players.values()];
+    for (let i = order.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));[order[i], order[j]] = [order[j], order[i]];
+    }
+    order.forEach((p, i) => { p.grid = i; });
+
   broadcast(room, 'race_start', {
     mapId: s.mapId, seed: s.seed, laps: s.laps, startIn: COUNTDOWN_MS,
-    players: [...room.players.values()].map(p => ({ id: p.id, name: p.name, color: p.color, slot: p.slot })),
+      players: [...room.players.values()].map(p => ({ id: p.id, name: p.name, color: p.color, slot: p.slot, grid: p.grid })),
   });
   room.race.goTimer = setTimeout(() => { if (room.state === 'countdown') { room.state = 'racing'; broadcast(room, 'go'); } }, COUNTDOWN_MS);
   room.tick = setInterval(() => tickRoom(room), TICK_MS);
@@ -172,7 +179,15 @@ wss.on('connection', (ws) => {
         p.name = cleanName(m.name);
         const r = createRoom(); addPlayer(r, p);
         send(ws, 'joined', { id: p.id, code: r.code }); pushRoom(r); break;
-      }
+        }
+        case 'color': {
+            if (!room || room.state !== 'lobby') break;
+            const c = String(m.color || '').toLowerCase();
+            if (!COLORS.includes(c)) break;
+            if ([...room.players.values()].some(q => q.id !== p.id && q.color === c))
+                return send(ws, 'error', { msg: '다른 플레이어가 사용 중인 색상입니다.' });
+            p.color = c; pushRoom(room); break;
+        }
       case 'join': {
         const r = rooms.get(String(m.code || '').toUpperCase().trim());
         if (!r) return send(ws, 'error', { msg: '방을 찾을 수 없습니다. 코드를 확인하세요.' });
@@ -212,6 +227,6 @@ setInterval(() => {
     if (ws._dead) { ws.terminate(); continue; }
     ws._dead = true; ws.ping(); ws.once('pong', () => { ws._dead = false; });
   }
-}, 30000);
+}, 8000);
 
 server.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
