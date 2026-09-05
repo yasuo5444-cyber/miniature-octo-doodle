@@ -140,7 +140,12 @@ $('btn-join').onclick = () => { const n = getName(); if (!n) return; const c = c
 codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') $('btn-join').click(); });
 $('btn-ready').onclick = () => { const me = app.room && app.room.players.find(p => p.id === app.me.id); if (me) net.send('ready', { ready: !me.ready }); };
 $('btn-start').onclick = () => net.send('start');
-$('btn-leave').onclick = () => { location.href = location.pathname; };
+$('btn-leave').onclick = () => {
+    net.send('leave'); // 서버에 나간다고 확실하게 신호 전송
+    setTimeout(() => {
+        location.href = location.pathname; // 0.1초 후 안전하게 로비로 이동
+    }, 100);
+};
 $('btn-invite').onclick = () => { const url = `${location.origin}${location.pathname}?room=${app.room.code}`; if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => toast('초대 링크를 복사했습니다'), () => prompt('링크 복사', url)); else prompt('링크 복사', url); };
 $('laps').onchange = (e) => net.send('settings', { laps: +e.target.value });
 $('btn-reroll').onclick = () => net.send('settings', { reroll: true });
