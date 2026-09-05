@@ -203,6 +203,8 @@ function endRace(room) {
 
 // ---------------- 소켓 ----------------
 wss.on('connection', (ws) => {
+    ws.isAlive = true; // 👈 추가
+    ws.on('pong', () => { ws.isAlive = true; }); // 👈 추가
     const p = { id: nextId++, ws, name: '', room: null };
     send(ws, 'welcome', { id: p.id });
     ws.on('message', (raw) => {
@@ -234,6 +236,9 @@ wss.on('connection', (ws) => {
                 send(ws, 'joined', { id: p.id, code: r.code }); pushRoom(r); break;
             }
             case 'ready': if (room && room.state === 'lobby') { p.ready = !!m.ready; pushRoom(room); } break;
+            case 'leave':
+                removePlayer(p);
+                break;
             case 'left':
                 removePlayer(p);
                 break;
@@ -272,11 +277,13 @@ wss.on('connection', (ws) => {
 });
 
 // 죽은 소켓 정리
-setInterval(() => {
-    for (const ws of wss.clients) {
-        if (ws._dead) { ws.terminate(); continue; }
-        ws._dead = true; ws.ping(); ws.once('pong', () => { ws._dead = false; });
-    }
-}, 1000); // 1초마다 빡세게 검사해서 바로바로 쳐냄!
+// 안정적인 15초 주기 하트비트
+const heartbeatInterval = setInterval(() => {
+    wss.clients.forEach((ws) => {
+        if (ws.isAlive === false) return ws.terminate();
+        ws.isAlive = false;
+        ws.ping();
+    });
+}, 15000);
 
 server.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
