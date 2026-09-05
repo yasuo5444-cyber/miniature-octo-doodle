@@ -251,11 +251,9 @@ function showResults(m) {
 // ---------- 차량 ----------
 function clearCars() { for (const c of app.cars.values()) { scene.remove(c.group); c.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); } app.cars.clear(); }
 function spawnCar(p) {
-    // 1. 내 아이디 판별 (객체나 숫자 등 어떤 형태든 안전하게 캐치)
-    const myId = (typeof app.me === 'object' ? app.me?.id : app.me) ?? app.myId;
-    const local = p.id === myId;
+    // 👇 핵심: === 대신 == 를 사용하여 문자/숫자 형태가 달라도 내 차로 찰떡같이 인식하게 만듭니다.
+    const local = (p.id == app.me.id);
 
-    // 2. 맵의 시작 그리드 위치 가져오기 (위치가 고정되지 않고 순서/랜덤에 따라 배치됨)
     const sp = app.track.spawn(p.grid), car = buildCar(p.color);
     car.group.position.set(sp.x, sp.y, sp.z);
     car.group.rotation.y = sp.a;
@@ -271,7 +269,6 @@ function spawnCar(p) {
     scene.add(car.group);
     app.cars.set(p.id, c);
 
-    // 3. 내 차일 경우 app.local에 장착하여 카메라와 조작이 붙도록 설정
     if (local) {
         app.local = { x: sp.x, y: sp.y, z: sp.z, vx: 0, vz: 0, vy: 0, a: sp.a, hint: sp.i, n: null, airborne: false, airTime: 0, drifting: false, slip: 0, nitro: 0, nitroOn: false, padBoost: 0, padLast: null, wrong: 0, shake: 0, camYaw: sp.a, off: 0 };
     }
@@ -451,7 +448,13 @@ function animateCar(c, dt, fs, steer, nitro, braking) {
   c.brakeM.color.setHex(braking ? 0xff2020 : 0x550000);
 }
 function updateLocalVisual(dt) {
-  const L = app.local, c = app.cars.get(app.me.id); if (!c) return;
+    const L = app.local;
+    // 👇 Map 키(Key) 문제로 차를 못 찾는 현상 방지: local이 true인 차를 직접 찾습니다!
+    let c = null;
+    for (const car of app.cars.values()) {
+        if (car.local) { c = car; break; }
+    }
+    if (!c) return;
   c.x = L.x; c.y = L.y; c.z = L.z; c.a = L.a; c.v = L.speed;
   c.group.position.set(L.x, L.y, L.z);
   c.pitch += (L.pitchTarget - c.pitch) * Math.min(1, dt * 6);
@@ -569,6 +572,7 @@ function frame(now) {
 
     // 👇 핵심: 이 함수가 실행되어야 카메라가 내 차 뒤로 찰싹 붙습니다!
     updateCamera(dt);
+    updateHud();
 
     renderer.render(scene, camera);
 }
