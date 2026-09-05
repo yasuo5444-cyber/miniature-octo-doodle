@@ -17,8 +17,8 @@ let myColor = localStorage.getItem('racer_color') || COLORS[0]; // 저장된 색
 const P = {
     maxSpeed: 42, accel: 18, brake: 28, reverseMax: 12, drag: 0.0006, roll: 0.04, engineBrake: 0.12,
     grip: 8, driftGrip: 2.0, steer: 1.7, driftSteer: 1.35,
-    nitroSpeed: 14, nitroAccel: 15, nitroUse: 65, nitroCharge: 15, // 부스터 소모는 빠르게(65), 충전은 느리게(15)
-    padSpeed: 14, padTime: 1.4, grassMax: 22, grassDrag: 1.5,
+    nitroSpeed: 16, nitroAccel: 18, nitroUse: 45, nitroCharge: 15, // 👈 부스터 속도/가속은 더 강력하게, 소모량(nitroUse)은 줄여서 지속 시간 연장!
+    padSpeed: 16, padTime: 2.0, grassMax: 22, grassDrag: 1.5, // 👈 부스트 패드 지속 시간(padTime)도 1.4초에서 2.0초로 상향
     gravity: 20, collideR: 2.3,
 };
 const NO_INPUT = { up: false, down: false, left: false, right: false, drift: false, nitro: false };
@@ -297,8 +297,13 @@ function stepLocal(dt, control) {
     const fs0 = L.vx * fwdX + L.vz * fwdZ, speed = Math.hypot(L.vx, L.vz);
     const n = T.nearest(L.x, L.z, L.hint); L.hint = n.i;
     const onRoad = Math.abs(n.lat) <= TRACK_WIDTH + 0.5; L.offRoad = !onRoad;
+    // 기존 코드:
+    // L.drifting = inp.drift && speed > 8 && !L.airborne;
+    // L.nitroOn = inp.nitro && L.nitro > 0 && !L.airborne && fs0 > 1;
+
+    // 👇 수정할 코드 (드리프트 중에는 부스터 사용 원천 차단!)
     L.drifting = inp.drift && speed > 8 && !L.airborne;
-    L.nitroOn = inp.nitro && L.nitro > 0 && !L.airborne && fs0 > 1;
+    L.nitroOn = inp.nitro && L.nitro > 0 && !L.airborne && fs0 > 1 && !L.drifting;
     if (L.nitroOn) L.nitro = Math.max(0, L.nitro - P.nitroUse * dt);
     // 조향 (a 증가 = 좌회전)
     const steer = (inp.left ? 1 : 0) - (inp.right ? 1 : 0), dir = fs0 >= -0.5 ? 1 : -1;
@@ -332,25 +337,22 @@ function stepLocal(dt, control) {
     L.vx = fX * f + rX * l; L.vz = fZ * f + rZ * l;
     L.x += L.vx * dt; L.z += L.vz * dt;
     // 벽 충돌 (미끄러지듯 스쳐 지나가도록 수정)
-    const n2 = T.nearest(L.x, L.z, L.hint); L.hint = n2.i; L.n = n2;
+    const frontX = L.x + fX * 1.2;
+    const frontZ = L.z + fZ * 1.2;
+    const n2 = T.nearest(frontX, frontZ, L.hint);
+    L.hint = n2.i; L.n = n2;
     const limit = TRACK_WIDTH + WALL_OFFSET - 1.0;
 
     if (Math.abs(n2.lat) > limit && L.y < n2.gy + 1.3) {
         const s = Math.sign(n2.lat);
 
-        // 1. 차가 벽을 뚫고 나가지 못하게 위치 즉시 보정
-        L.x = n2.cx + n2.rx * s * limit;
-        L.z = n2.cz + n2.rz * s * limit;
+        L.x = n2.cx + n2.rx * s * limit - fX * 1.2;
+        L.z = n2.cz + n2.rz * s * limit - fZ * 1.2;
 
-        // 2. 벽 방향으로 뚫고 들어가려는 힘(법선 속도) 계산
         const vn = L.vx * n2.rx + L.vz * n2.rz;
-
         if (vn * s > 0) {
-            // 3. 벽을 파고드는 힘만 반대로 튕겨냄 (1.2 = 반발력 약하게 설정)
             L.vx -= vn * n2.rx * 1.2;
             L.vz -= vn * n2.rz * 1.2;
-
-            // 4. 벽에 긁힐 때의 마찰력 (0.85 -> 0.98로 변경하여 전진 속도 유지)
             L.vx *= 0.98;
             L.vz *= 0.98;
 
@@ -437,7 +439,8 @@ function updateLocalVisual(dt) {
   c.pitch += (L.pitchTarget - c.pitch) * Math.min(1, dt * 6);
   c.group.rotation.set(c.pitch, L.a, -L.steerVis * 0.06 * Math.min(1, L.speed / 25));
   animateCar(c, dt, L.fs, L.steerVis, L.nitroOn, input.down && L.fs > 0.5);
-  const fX = Math.sin(L.a), fZ = Math.cos(L.a), rX = -fZ, rZ = fX, R = () => Math.random() - 0.5;
+  const fX = Math.sin(L.a), fZ = Math.cos(L.a), rX = -f
+  , rZ = fX, R = () => Math.random() - 0.5;
   if (!L.airborne && L.speed > 6) {
     if (L.drifting && L.slip > 0.12) for (const s of [-1, 1]) if (Math.random() < 0.7) particles.emit(L.x + rX * s * 0.9 - fX * 1.4, L.y + 0.2, L.z + rZ * s * 0.9 - fZ * 1.4, R() * 2, 0.8, R() * 2, 0.85, 0.85, 0.88, 0.9);
     if (L.offRoad && Math.random() < 0.8) particles.emit(L.x - fX * 1.4 + R() * 2, L.y + 0.15, L.z - fZ * 1.4 + R() * 2, R() * 3, 1.5, R() * 3, 0.55, 0.42, 0.25, 0.7);
