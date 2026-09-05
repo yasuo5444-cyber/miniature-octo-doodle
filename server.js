@@ -48,11 +48,16 @@ function createRoom() {
   return room;
 }
 function addPlayer(room, p) {
+    // 1. 현재 사용 중인 슬롯 번호 파악 및 할당
+    const usedSlots = new Set([...room.players.values()].map(q => q.slot));
+    p.slot = [0, 1, 2, 3].find(s => !usedSlots.has(s)) ?? 0;
+
+    // 2. 사용 중인 색상 파악 및 할당
     const usedC = new Set([...room.players.values()].map(q => q.color));
     p.color = COLORS.find(c => !usedC.has(c)) || COLORS[p.slot];
-  p.slot = [0, 1, 2, 3].find(s => !used.has(s));
-  room.players.set(p.id, p);
-  if (room.host === null) room.host = p.id;
+
+    room.players.set(p.id, p);
+    if (room.host === null) room.host = p.id;
 }
 function destroyRoom(room) {
   clearInterval(room.tick);
