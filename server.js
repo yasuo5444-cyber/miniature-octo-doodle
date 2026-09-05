@@ -51,15 +51,20 @@ function createRoom() {
 }
 
 function addPlayer(room, p) {
+    // 혹시 모를 중복 유저 찌꺼기 제거
+    for (const [id, player] of room.players.entries()) {
+        if (player.name === p.name || player.ws === p.ws) {
+            room.players.delete(id);
+        }
+    }
+
     const usedSlots = new Set([...room.players.values()].map(q => q.slot));
     p.slot = [0, 1, 2, 3].find(s => !usedSlots.has(s)) ?? 0;
 
     const usedC = new Set([...room.players.values()].map(q => q.color));
     p.color = COLORS.find(c => !usedC.has(c)) || COLORS[p.slot];
 
-    // 🚨 이 부분이 반드시 있어야 대기방에서 나갔을 때 즉시 사라집니다!
     p.room = room;
-
     room.players.set(p.id, p);
     if (room.host === null) room.host = p.id;
 }
@@ -74,27 +79,35 @@ function removePlayer(p) {
     if (!p || !p.room) return;
     const room = p.room;
 
-    // 1. 방의 플레이어 목록에서 삭제
+    // 1. 방의 플레이어 목록에서 확실하게 삭제
     room.players.delete(p.id);
 
-    // 2. 남은 사람들에게 퇴장 소식 전송 (broadcast 함수 사용)
+    // 2. 혹시 이름이나 다른 속성으로 찌꺼기가 남아있다면 전부 색출해서 삭제
+    for (const [id, player] of room.players.entries()) {
+        if (player.name === p.name || player.ws === p.ws) {
+            room.players.delete(id);
+        }
+    }
+
+    // 3. 남은 사람들에게 퇴장 소식 전송
     broadcast(room, 'left', { id: p.id });
 
-    // 3. 방에 아무도 없으면 방 폭파
+    // 4. 방에 아무도 없으면 방 폭파
     if (room.players.size === 0) {
         rooms.delete(room.code);
     }
-    // 4. 방장이 나갔으면 권한 위임
+    // 5. 방장이 나갔으면 권한 위임
     else if (room.host === p.id) {
         room.host = room.players.keys().next().value;
     }
 
-    // 5. 로비 화면 갱신
+    // 6. 로비 화면 갱신
     pushRoom(room);
 
     p.room = null;
     p.ready = false;
-} function startRace(room) {
+}
+function startRace(room) {
     const s = room.settings;
     if (!MAP_CP[s.mapId]) s.mapId = 'sunset';
     if (room.race) { clearTimeout(room.race.dnfTimer); clearTimeout(room.race.goTimer); }
