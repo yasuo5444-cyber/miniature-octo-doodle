@@ -207,13 +207,15 @@ net.on('room', m => {
 net.on('left', m => { const c = app.cars.get(m.id); if (c) { toast(`${c.name} 님이 나갔습니다`); scene.remove(c.group); app.cars.delete(m.id); } });
 net.on('pong', m => { net.ping = Math.round(performance.now() - m.t); });
 net.on('race_start', m => {
-  app.phase = 'countdown'; app.finished = false; app.laps = m.laps; app.ranks = []; app.lapInfo = { lap: 0, last: null, best: null };
-  loadTrack(m.mapId, m.seed);
-  show($('lobby'), false); show($('results'), false); show($('hud'), true); show($('touch'), isTouch);
-  clearCars(); for (const p of m.players) spawnCar(p);
-  camInit = false; sfx.init();
-  $('hud-map').textContent = `${MAPS[m.mapId].icon} ${MAPS[m.mapId].name}`; $('hud-lap').textContent = `LAP 1/${m.laps}`;
-  runCountdown(m.startIn);
+    app.phase = 'countdown'; app.finished = false; app.laps = m.laps; app.ranks = []; app.lapInfo = { lap: 0, last: null, best: null };
+    loadTrack(m.mapId, m.seed);
+    show($('lobby'), false); show($('results'), false); show($('hud'), true); show($('touch'), isTouch);
+    clearCars(); for (const p of m.players) spawnCar(p);
+
+    camInit = false; // 👈 이 코드가 있어야 내 차 기준으로 카메라가 다시 세팅됩니다!
+    sfx.init();
+    $('hud-map').textContent = `${MAPS[m.mapId].icon} ${MAPS[m.mapId].name}`; $('hud-lap').textContent = `LAP 1/${m.laps}`;
+    runCountdown(m.startIn);
 });
 net.on('go', () => { app.phase = 'racing'; app.goTime = app.lapStartPerf = performance.now(); sfx.go(); });
 net.on('states', m => {
@@ -425,6 +427,8 @@ function stepLocal(dt, control) {
             L.vz *= 0.99;
         }
     }
+    L.speed = Math.hypot(L.vx, L.vz);
+    L.fs = fs0;
 }
 function animateCar(c, dt, fs, steer, nitro, braking) {
   for (const w of c.wheels) w.rotation.x += fs * dt / 0.38;
@@ -522,23 +526,27 @@ function sendState() {
 // ---------- 메인 루프 ----------
 let last = performance.now(), sendAcc = 0, hudAcc = 0;
 function frame(now) {
-  requestAnimationFrame(frame);
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  if (!app.track) return;
-  if (app.phase === 'enter' || app.phase === 'lobby') {
-    lobbyCamera(now / 1000); sfx.setEngine(0, false, false); sfx.setSkid(false, 0); sfx.setNitro(false);
-    renderer.render(scene, camera); return;
-  }
-  readInput();
-  const control = app.phase === 'racing' && !app.finished;
-  if (app.local) {
-    const steps = Math.max(1, Math.min(6, Math.ceil(dt / (1 / 120)))), h = dt / steps;
-    for (let i = 0; i < steps; i++) stepLocal(h, control);
-    updateLocalVisual(dt);
-    sendAcc += dt; if (sendAcc >= 1 / 15 && app.phase !== 'results') { sendAcc = 0; sendState(); }
-    sfx.setEngine(app.local.speed, control && input.up, app.local.nitroOn); sfx.setSkid(app.local.drifting && app.local.slip > 0.1, app.local.slip); sfx.setNitro(app.local.nitroOn);
-  }
-  updateRemote(dt); particles.update(dt); updateCamera(dt);
+    requestAnimationFrame(frame);
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (!app.track) return;
+
+    // 👇 phase가 'enter'나 'lobby'일 때만 맵 전체를 비추는 로비 카메라가 돌게 해야 합니다!
+    if (app.phase === 'enter' || app.phase === 'lobby') {
+        lobbyCamera(now / 1000); sfx.setEngine(0, false, false); sfx.setSkid(false, 0); sfx.setNitro(false);
+        renderer.render(scene, camera); return;
+    }
+
+    // 경기가 시작(카운트다운 또는 레이싱)되면 로비 카메라를 멈추고 내 차를 비추는 updateCamera가 작동합니다.
+    readInput();
+    const control = app.phase === 'racing' && !app.finished;
+    if (app.local) {
+        const steps = Math.max(1, Math.min(6, Math.ceil(dt / (1 / 120)))), h = dt / steps;
+        for (let i = 0; i < steps; i++) stepLocal(h, control);
+        updateLocalVisual(dt);
+        sendAcc += dt; if (sendAcc >= 1 / 15 && app.phase !== 'results') { sendAcc = 0; sendState(); }
+        sfx.setEngine(app.local.speed, control && input.up, app.local.nitroOn); sfx.setSkid(app.local.drifting && app.local.slip > 0.1, app.local.slip); sfx.setNitro(app.local.nitroOn);
+    }
+    updateRemote(dt); particles.update(dt); updateCamera(dt); // 👈 여기서 내 차를 쫓는 카메라가 실행됨
   if (app.track.padMat) app.track.padMat.color.setHSL(0.52, 1, 0.75 + Math.sin(now / 120) * 0.2);
   hudAcc += dt; if (hudAcc > 0.1) { hudAcc = 0; updateHud(); }
   drawMinimap();
