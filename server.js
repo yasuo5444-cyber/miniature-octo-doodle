@@ -71,14 +71,30 @@ function destroyRoom(room) {
 }
 
 function removePlayer(p) {
-    const room = p.room; if (!room) return;
-    room.players.delete(p.id); p.room = null;
-    if (room.players.size === 0) { destroyRoom(room); return; }
-    if (room.host === p.id) room.host = room.players.keys().next().value;
-    broadcast(room, 'left', { id: p.id });
-    if (room.race) { room.race.prog.delete(p.id); if (room.state === 'racing') checkAllFinished(room); }
-    if (room.race && room.state === 'racing') tickRoom(room);
+    if (!p || !p.room) return;
+    const room = p.room;
+
+    // 1. 방의 플레이어 목록에서 이 유저를 확실하게 삭제
+    room.players.delete(p.id);
+
+    // 2. 이 방에 남아있는 다른 모든 사람들에게 "이 사람이 나갔다"고 즉시 알림
+    broadcastRoom(room, { type: 'left', id: p.id });
+
+    // 3. 방에 아무도 남지 않았으면 방 자체를 서버 메모리에서 폭파(삭제)
+    if (room.players.size === 0) {
+        rooms.delete(room.code);
+    }
+    // 4. 만약 나간 사람이 방장(Host)이었다면, 남은 사람 중 첫 번째 사람에게 방장 권한 자동 위임
+    else if (room.host === p.id) {
+        room.host = room.players.keys().next().value;
+    }
+
+    // 5. 방의 최신 상태를 남은 사람들에게 전송해서 로비 화면 즉시 갱신
     pushRoom(room);
+
+    // 6. 플레이어 객체의 방 정보 초기화
+    p.room = null;
+    p.ready = false;
 }
 
 // ---------------- 경기 ----------------
@@ -269,6 +285,6 @@ setInterval(() => {
         if (ws._dead) { ws.terminate(); continue; }
         ws._dead = true; ws.ping(); ws.once('pong', () => { ws._dead = false; });
     }
-}, 1500); // 2초마다 빡세게 검사해서 바로바로 쳐냄!
+}, 1000); // 1초마다 빡세게 검사해서 바로바로 쳐냄!
 
 server.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
