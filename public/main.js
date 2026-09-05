@@ -270,14 +270,16 @@ function showResults(m) {
 // ---------- 차량 ----------
 function clearCars() { for (const c of app.cars.values()) { scene.remove(c.group); c.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); } app.cars.clear(); }
 function spawnCar(p) {
-    if (!p) return; // p가 빈 값일 경우 멈춤 방지
+    if (!p) return;
     const myId = app.me ? app.me.id : app.myId;
     const local = (p.id == myId);
 
-    // 🚨 p.grid나 p.slot 값이 누락되었을 경우 에러가 나지 않도록 0을 기본값으로 강제 지정
+    // 혹시 맵에서 높이(y) 값을 누락해서 보내더라도 차가 지하로 꺼지지 않도록 방어
     const gridPos = p.grid !== undefined ? p.grid : (p.slot !== undefined ? p.slot : 0);
-    const sp = app.track.spawn(gridPos), car = buildCar(p.color || '#ffffff');
+    const sp = app.track.spawn(gridPos);
+    if (sp.y === undefined) sp.y = 0;
 
+    const car = buildCar(p.color || '#ffffff');
     car.group.position.set(sp.x, sp.y, sp.z);
     car.group.rotation.y = sp.a;
 
@@ -293,7 +295,13 @@ function spawnCar(p) {
     app.cars.set(p.id, c);
 
     if (local) {
-        app.local = { x: sp.x, y: sp.y, z: sp.z, vx: 0, vz: 0, vy: 0, a: sp.a, hint: sp.i, n: null, airborne: false, airTime: 0, drifting: false, slip: 0, nitro: 0, nitroOn: false, padBoost: 0, padLast: null, wrong: 0, shake: 0, camYaw: sp.a, off: 0 };
+        // 👇 결정적 해결! steerVis: 0 과 landBurst: 0 을 추가하여 차가 화면에서 사라지는 버그를 완벽 해결했습니다.
+        app.local = {
+            x: sp.x, y: sp.y, z: sp.z, vx: 0, vz: 0, vy: 0, a: sp.a, hint: sp.i, n: null,
+            airborne: false, airTime: 0, drifting: false, slip: 0, nitro: 0, nitroOn: false,
+            padBoost: 0, padLast: null, wrong: 0, shake: 0, camYaw: sp.a, off: 0,
+            steerVis: 0, landBurst: 0
+        };
     }
 }
 // ---------- 입력 ----------
