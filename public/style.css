@@ -59,3 +59,33 @@ table { width: 100%; border-collapse: collapse; margin-bottom: 14px; } th, td { 
 #touch .tl, #touch .tr { position: absolute; bottom: 24px; display: flex; gap: 12px; pointer-events: auto; } #touch .tl { left: 20px; } #touch .tr { right: 20px; }
 #touch button { width: 64px; height: 64px; border-radius: 50%; background: rgba(255,255,255,.15); font-size: 18px; font-weight: 700; } #touch button.on { background: rgba(255,210,63,.6); }
 @media (pointer: coarse) { #hud-bottom { left: 50%; transform: translateX(-50%); bottom: 100px; text-align: center; } #minimap { width: 120px; height: 120px; bottom: 110px; } #hud-ping { display: none; } }
+/* 색상 커스터마이징 UI */
+.color-picker {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.color-btn {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: 0.15s;
+}
+
+    .color-btn:hover {
+        transform: scale(1.15);
+    }
+
+    .color-btn.sel {
+        border-color: #fff;
+        transform: scale(1.15);
+        box-shadow: 0 0 8px rgba(255,255,255,0.6);
+    }
+
+    .color-btn.disabled {
+        opacity: 0.15;
+        pointer-events: none;
+    }
