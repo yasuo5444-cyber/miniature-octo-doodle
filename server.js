@@ -1,211 +1,217 @@
-'use strict';
-/**
- * LowPoly Racer - 서버 (Express 정적 파일 + ws 실시간)
- * - 6자리 방 코드, 최대 4명
- * - 체크포인트/랩/완주 판정은 서버가 검증 (건너뛰기·역주행 무시)
- * - 경기 종료 후 같은 방·같은 멤버로 재경기 (같은 트랙 / 새 트랙)
- */
-const express = require('express');
+// 로우폴리 레이서 v3 — 서버 (방 관리 + 상태 중계 + 체크포인트/랩 검증)
 const http = require('http');
 const path = require('path');
+const express = require('express');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 4;
-const CHECKPOINTS = 12;               // public/track.js 의 CHECKPOINTS 와 반드시 동일
-const COLORS = ['#ff4d4d', '#4da6ff', '#5cd65c', '#ffd24d'];
-const FINISH_GRACE_MS = 45000;        // 1등 완주 후 나머지에게 주는 시간
-
-const rooms = new Map();
-let nextId = 1;
-const now = () => Date.now();
-const rand = (n) => Math.floor(Math.random() * n);
+const TICK_MS = 66;            // 상태 브로드캐스트 15Hz
+const COUNTDOWN_MS = 3800;     // race_start → go
+const DNF_MS = 60000;          // 1등 완주 후 나머지 대기 시간
+const LAP_CHOICES = [1, 2, 3, 5];
+const COLORS = ['#ff4b4b', '#3fa9ff', '#ffd23f', '#4bff8a'];
+// ⚠ public/maps.js 의 cp 값과 반드시 동일해야 함
+const MAP_CP = { sunset: 12, harbor: 18, mountain: 16, canyon: 20, random: 12 };
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size }));
+app.get('/healthz', (_, res) => res.send('ok'));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-function genCode() { let c; do c = String(100000 + rand(900000)); while (rooms.has(c)); return c; }
-function send(ws, type, data = {}) { if (ws.readyState === 1) ws.send(JSON.stringify({ type, ...data })); }
-function broadcast(room, type, data = {}, except = null) {
-  for (const p of room.players.values()) if (p.ws !== except) send(p.ws, type, data);
-}
+const rooms = new Map();
+let nextId = 1;
 
-function publicPlayer(p) {
-  return { id: p.id, name: p.name, color: p.color, slot: p.slot, ready: p.ready, lap: p.lap, cp: p.cp,
-    finished: p.finished, finishTime: p.finishTime, bestLap: p.bestLap };
+const newSeed = () => (Math.random() * 0xffffffff) >>> 0;
+function newCode() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = ''; for (let i = 0; i < 6; i++) s += A[Math.floor(Math.random() * A.length)];
+  return rooms.has(s) ? newCode() : s;
 }
+function send(ws, type, data = {}) { if (ws.readyState === 1) ws.send(JSON.stringify({ type, ...data })); }
+function broadcast(room, type, data = {}) { for (const p of room.players.values()) send(p.ws, type, data); }
+function cleanName(n) { n = String(n || '').replace(/[<>]/g, '').trim().slice(0, 12); return n || '플레이어'; }
+
 function roomInfo(room) {
-  return { code: room.code, hostId: room.hostId, state: room.state, seed: room.seed, laps: room.laps,
-    players: [...room.players.values()].map(publicPlayer) };
+  return {
+    code: room.code, host: room.host, state: room.state, settings: room.settings,
+    players: [...room.players.values()].map(p => ({ id: p.id, name: p.name, color: p.color, ready: p.ready, slot: p.slot })),
+  };
 }
+const pushRoom = (room) => broadcast(room, 'room', roomInfo(room));
+
 function createRoom() {
-  const room = { code: genCode(), hostId: null, state: 'lobby', seed: rand(1e9), laps: 3,
-    players: new Map(), raceStart: 0, finishOrder: [], endTimer: null, countdownTimers: [] };
+  const room = { code: newCode(), host: null, state: 'lobby', players: new Map(), race: null, tick: null,
+    settings: { laps: 3, mapId: 'sunset', seed: newSeed() } };
   rooms.set(room.code, room);
   return room;
 }
-function freeSlot(room) {
-  const used = new Set([...room.players.values()].map(p => p.slot));
-  for (let i = 0; i < MAX_PLAYERS; i++) if (!used.has(i)) return i;
-  return -1;
-}
-function resetPlayerRace(p) {
-  p.lap = 1; p.cp = 0; p.finished = false; p.finishTime = null; p.bestLap = null; p.lastLap = null; p.lapStart = 0; p.progress = 0;
-}
-function clearTimers(room) {
-  if (room.endTimer) clearTimeout(room.endTimer); room.endTimer = null;
-  room.countdownTimers.forEach(clearTimeout); room.countdownTimers = [];
-}
-
-function joinRoom(room, ws, name) {
-  const slot = freeSlot(room);
-  const p = { id: nextId++, ws, room, name: String(name || 'Player').trim().slice(0, 12) || 'Player', slot, color: COLORS[slot], ready: false };
-  resetPlayerRace(p);
+function addPlayer(room, p) {
+  const used = new Set([...room.players.values()].map(q => q.slot));
+  p.slot = [0, 1, 2, 3].find(s => !used.has(s));
+  p.color = COLORS[p.slot]; p.ready = false; p.state = null; p.room = room;
   room.players.set(p.id, p);
-  if (room.hostId === null) room.hostId = p.id;
-  ws.player = p;
-  send(ws, 'joined', { id: p.id, room: roomInfo(room) });
-  broadcast(room, 'room', { room: roomInfo(room) }, ws);
+  if (room.host === null) room.host = p.id;
 }
-
-function leaveRoom(p) {
+function destroyRoom(room) {
+  clearInterval(room.tick);
+  if (room.race) { clearTimeout(room.race.dnfTimer); clearTimeout(room.race.goTimer); }
+  rooms.delete(room.code);
+}
+function removePlayer(p) {
   const room = p.room; if (!room) return;
-  room.players.delete(p.id);
-  p.room = null;
-  if (room.players.size === 0) { clearTimers(room); rooms.delete(room.code); return; }
-  if (room.hostId === p.id) room.hostId = room.players.values().next().value.id;
-  broadcast(room, 'left', { id: p.id, name: p.name });
-  broadcast(room, 'room', { room: roomInfo(room) });
-  if (room.state === 'racing') checkRaceEnd(room);
+  room.players.delete(p.id); p.room = null;
+  if (room.players.size === 0) { destroyRoom(room); return; }
+  if (room.host === p.id) room.host = room.players.keys().next().value;
+  broadcast(room, 'left', { id: p.id });
+  if (room.race) { room.race.prog.delete(p.id); if (room.state === 'racing') checkAllFinished(room); }
+  pushRoom(room);
 }
 
+// ---------------- 경기 ----------------
 function startRace(room) {
-  clearTimers(room);
-  room.state = 'countdown'; room.finishOrder = [];
-  for (const p of room.players.values()) resetPlayerRace(p);
-  broadcast(room, 'race_setup', { room: roomInfo(room) });
-  [3, 2, 1].forEach((n, i) => room.countdownTimers.push(setTimeout(() => broadcast(room, 'count', { n }), 1500 + i * 1000)));
-  room.countdownTimers.push(setTimeout(() => {
-    room.state = 'racing'; room.raceStart = now();
-    for (const p of room.players.values()) p.lapStart = room.raceStart;
-    broadcast(room, 'go', {});
-  }, 4500));
+  const s = room.settings;
+  if (!MAP_CP[s.mapId]) s.mapId = 'sunset';
+  if (room.race) { clearTimeout(room.race.dnfTimer); clearTimeout(room.race.goTimer); }
+  clearInterval(room.tick);
+  room.state = 'countdown';
+  const t0 = Date.now() + COUNTDOWN_MS;
+  const prog = new Map();
+  for (const p of room.players.values()) {
+    p.ready = false; p.state = null;
+    prog.set(p.id, { nextCp: 1, lap: 0, lapStart: t0, laps: [], best: null, finished: false, finishTime: null, t: 0 });
+  }
+  room.race = { t0, cp: MAP_CP[s.mapId], prog, finishOrder: [], dnfTimer: null, goTimer: null };
+  broadcast(room, 'race_start', {
+    mapId: s.mapId, seed: s.seed, laps: s.laps, startIn: COUNTDOWN_MS,
+    players: [...room.players.values()].map(p => ({ id: p.id, name: p.name, color: p.color, slot: p.slot })),
+  });
+  room.race.goTimer = setTimeout(() => { if (room.state === 'countdown') { room.state = 'racing'; broadcast(room, 'go'); } }, COUNTDOWN_MS);
+  room.tick = setInterval(() => tickRoom(room), TICK_MS);
 }
 
-function handleCheckpoint(p, index) {
-  const room = p.room;
-  if (!room || room.state !== 'racing' || p.finished) return;
-  if (!Number.isInteger(index) || index < 0 || index >= CHECKPOINTS) return;
-  const expected = (p.cp + 1) % CHECKPOINTS;
-  if (index !== expected) return;            // 건너뛰기 / 역주행은 무시
-  p.cp = index;
-  if (index === 0) {                          // 출발선 통과 = 랩 완료
-    const t = now();
-    const lapTime = t - p.lapStart; p.lapStart = t; p.lastLap = lapTime;
-    if (p.bestLap === null || lapTime < p.bestLap) p.bestLap = lapTime;
-    p.lap++;
-    if (p.lap > room.laps) {
-      p.finished = true; p.finishTime = t - room.raceStart;
-      room.finishOrder.push(p.id);
-      broadcast(room, 'finished', { id: p.id, place: room.finishOrder.length, time: p.finishTime });
-      if (!room.endTimer) room.endTimer = setTimeout(() => endRace(room), FINISH_GRACE_MS);
-    }
+function tickRoom(room) {
+  const race = room.race; if (!race) return;
+  const arr = [], rank = [];
+  for (const p of room.players.values()) {
+    if (p.state) arr.push([p.id, ...p.state]);
+    const g = race.prog.get(p.id); if (!g) continue;
+    const score = g.finished ? 1e6 - race.finishOrder.indexOf(p.id)
+      : g.lap * race.cp + ((g.nextCp - 1 + race.cp) % race.cp) + g.t;
+    rank.push({ id: p.id, score });
   }
-  broadcast(room, 'progress', { id: p.id, lap: p.lap, cp: p.cp, lastLap: p.lastLap, bestLap: p.bestLap, finished: p.finished });
-  checkRaceEnd(room);
+  rank.sort((a, b) => b.score - a.score);
+  broadcast(room, 'states', { s: arr, r: rank.map(x => x.id) });
 }
-function checkRaceEnd(room) {
+
+const num = (v, d = 0) => (Number.isFinite(+v) ? +v : d);
+function onState(p, m) {
+  const room = p.room; if (!room || !room.race) return;
+  p.state = [+num(m.x).toFixed(2), +num(m.y).toFixed(2), +num(m.z).toFixed(2), +num(m.a).toFixed(3), +num(m.v).toFixed(1), m.f | 0];
   if (room.state !== 'racing') return;
-  const all = [...room.players.values()];
-  if (all.length && all.every(p => p.finished)) endRace(room);
+  const race = room.race, g = race.prog.get(p.id);
+  if (!g || g.finished) return;
+  const t = ((num(m.t) % 1) + 1) % 1; g.t = t;
+  const cp = Math.floor(t * race.cp), CP = race.cp;
+  // 다음 체크포인트(랙 보정으로 그 다음 하나까지)만 인정 → 지름길·역주행 무효
+  for (let k = 0; k <= 1; k++) {
+    if (cp !== (g.nextCp + k) % CP) continue;
+    for (let j = 0; j <= k; j++) if ((g.nextCp + j) % CP === 0) completeLap(room, p, g);
+    if (g.finished) return;
+    g.nextCp = (cp + 1) % CP;
+    return;
+  }
+}
+function completeLap(room, p, g) {
+  const now = Date.now(), lt = now - g.lapStart;
+  g.lapStart = now; g.laps.push(lt); g.lap++;
+  if (g.best === null || lt < g.best) g.best = lt;
+  send(p.ws, 'lap', { lap: g.lap, time: lt, best: g.best });
+  if (g.lap >= room.settings.laps) finishPlayer(room, p, g, now);
+}
+function finishPlayer(room, p, g, now) {
+  const race = room.race;
+  g.finished = true; g.finishTime = now - race.t0;
+  race.finishOrder.push(p.id);
+  broadcast(room, 'finish', { id: p.id, time: g.finishTime, pos: race.finishOrder.length });
+  if (race.finishOrder.length === 1) race.dnfTimer = setTimeout(() => endRace(room), DNF_MS);
+  checkAllFinished(room);
+}
+function checkAllFinished(room) {
+  const race = room.race; if (!race || room.state !== 'racing') return;
+  let all = true;
+  for (const p of room.players.values()) { const g = race.prog.get(p.id); if (g && !g.finished) all = false; }
+  if (all) endRace(room);
 }
 function endRace(room) {
-  if (room.state !== 'racing') return;
-  clearTimers(room);
-  room.state = 'finished';
-  const all = [...room.players.values()];
-  const finished = all.filter(p => p.finished).sort((a, b) => a.finishTime - b.finishTime);
-  const score = p => p.lap * CHECKPOINTS + p.cp + (p.progress || 0);
-  const dnf = all.filter(p => !p.finished).sort((a, b) => score(b) - score(a));
-  const results = [...finished, ...dnf].map((p, i) => ({ place: i + 1, id: p.id, name: p.name, color: p.color,
-    time: p.finishTime, bestLap: p.bestLap, lap: p.lap, finished: p.finished }));
-  broadcast(room, 'results', { results });
+  const race = room.race; if (!race || room.state === 'results') return;
+  clearTimeout(race.dnfTimer); clearInterval(room.tick); room.tick = null;
+  room.state = 'results';
+  const list = [];
+  for (const p of room.players.values()) {
+    const g = race.prog.get(p.id); if (!g) continue;
+    const score = g.lap * race.cp + ((g.nextCp - 1 + race.cp) % race.cp) + g.t;
+    list.push({ id: p.id, name: p.name, color: p.color, time: g.finished ? g.finishTime : null, best: g.best, laps: g.lap, score });
+  }
+  list.sort((a, b) => (a.time !== null && b.time !== null) ? a.time - b.time : (a.time !== null ? -1 : b.time !== null ? 1 : b.score - a.score));
+  broadcast(room, 'results', { mapId: room.settings.mapId, laps: room.settings.laps, list: list.map(({ score, ...r }) => r) });
 }
 
+// ---------------- 소켓 ----------------
 wss.on('connection', (ws) => {
-  ws.isAlive = true;
-  ws.on('pong', () => { ws.isAlive = true; });
+  const p = { id: nextId++, ws, name: '', room: null };
+  send(ws, 'welcome', { id: p.id });
   ws.on('message', (raw) => {
-    let msg; try { msg = JSON.parse(raw); } catch { return; }
-    const p = ws.player; const room = p && p.room;
-    switch (msg.type) {
-      case 'ping': send(ws, 'pong', { t: msg.t }); break;
-
-      case 'create': { if (p) leaveRoom(p); joinRoom(createRoom(), ws, msg.name); break; }
-
-      case 'join': {
-        const r = rooms.get(String(msg.code || '').trim());
-        if (!r) return send(ws, 'error', { message: '존재하지 않는 방 코드입니다.' });
-        if (r.players.size >= MAX_PLAYERS) return send(ws, 'error', { message: '방이 가득 찼습니다 (최대 4명).' });
-        if (r.state !== 'lobby' && r.state !== 'finished') return send(ws, 'error', { message: '경기가 진행 중인 방입니다. 끝난 뒤 참가하세요.' });
-        if (p) leaveRoom(p);
-        joinRoom(r, ws, msg.name); break;
+    let m; try { m = JSON.parse(raw); } catch { return; }
+    const room = p.room, host = room && room.host === p.id;
+    switch (m.type) {
+      case 'ping': send(ws, 'pong', { t: m.t }); break;
+      case 'create': {
+        if (room) removePlayer(p);
+        p.name = cleanName(m.name);
+        const r = createRoom(); addPlayer(r, p);
+        send(ws, 'joined', { id: p.id, code: r.code }); pushRoom(r); break;
       }
-
-      case 'leave': if (p) leaveRoom(p); break;
-
-      case 'ready':
-        if (room && room.state === 'lobby') { p.ready = !!msg.ready; broadcast(room, 'room', { room: roomInfo(room) }); }
-        break;
-
-      case 'set_laps':
-        if (room && room.hostId === p.id && room.state === 'lobby') {
-          room.laps = Math.min(9, Math.max(1, msg.laps | 0)); broadcast(room, 'room', { room: roomInfo(room) });
-        }
-        break;
-
-      case 'new_track':
-        if (room && room.hostId === p.id && room.state === 'lobby') { room.seed = rand(1e9); broadcast(room, 'room', { room: roomInfo(room) }); }
-        break;
-
+      case 'join': {
+        const r = rooms.get(String(m.code || '').toUpperCase().trim());
+        if (!r) return send(ws, 'error', { msg: '방을 찾을 수 없습니다. 코드를 확인하세요.' });
+        if (r.players.size >= MAX_PLAYERS) return send(ws, 'error', { msg: '방이 가득 찼습니다 (최대 4명).' });
+        if (r.state !== 'lobby') return send(ws, 'error', { msg: '경기가 진행 중입니다. 끝난 뒤 다시 시도하세요.' });
+        if (room) removePlayer(p);
+        p.name = cleanName(m.name); addPlayer(r, p);
+        send(ws, 'joined', { id: p.id, code: r.code }); pushRoom(r); break;
+      }
+      case 'ready': if (room && room.state === 'lobby') { p.ready = !!m.ready; pushRoom(room); } break;
+      case 'settings': {
+        if (!host || room.state !== 'lobby') break;
+        if (LAP_CHOICES.includes(+m.laps)) room.settings.laps = +m.laps;
+        if (m.mapId && MAP_CP[m.mapId]) { room.settings.mapId = m.mapId; if (m.mapId === 'random') room.settings.seed = newSeed(); }
+        if (m.reroll) room.settings.seed = newSeed();
+        pushRoom(room); break;
+      }
       case 'start': {
-        if (!room || room.hostId !== p.id || room.state !== 'lobby') return;
-        const all = [...room.players.values()];
-        if (!all.every(q => q.ready || q.id === room.hostId)) return send(ws, 'error', { message: '모든 플레이어가 준비되어야 합니다.' });
+        if (!host || room.state !== 'lobby') break;
+        const allReady = [...room.players.values()].every(q => q.id === room.host || q.ready);
+        if (!allReady) return send(ws, 'error', { msg: '모든 플레이어가 준비되어야 합니다.' });
         startRace(room); break;
       }
-
-      case 'state': {
-        if (!room || room.state === 'lobby') return;
-        p.progress = Math.max(0, Math.min(1, +msg.f || 0));
-        broadcast(room, 's', { id: p.id, x: +msg.x || 0, z: +msg.z || 0, a: +msg.a || 0, v: +msg.v || 0,
-          d: msg.d ? 1 : 0, n: msg.n ? 1 : 0, f: p.progress }, ws);
+      case 'rematch': if (host && room.state === 'results') startRace(room); break;
+      case 'to_lobby':
+        if (host && room.state === 'results') { room.state = 'lobby'; room.race = null; for (const q of room.players.values()) q.ready = false; pushRoom(room); }
         break;
-      }
-
-      case 'checkpoint': if (p) handleCheckpoint(p, msg.index); break;
-
-      case 'rematch': {
-        if (!room || room.hostId !== p.id || room.state !== 'finished') return;
-        clearTimers(room); room.state = 'lobby';
-        if (msg.newTrack) room.seed = rand(1e9);
-        for (const q of room.players.values()) { resetPlayerRace(q); q.ready = false; }
-        broadcast(room, 'room', { room: roomInfo(room) }); break;
-      }
+      case 'state': onState(p, m); break;
     }
   });
-  ws.on('close', () => { if (ws.player) leaveRoom(ws.player); });
+  ws.on('close', () => removePlayer(p));
+  ws.on('error', () => {});
 });
-
-// 죽은 연결 정리
+// 죽은 소켓 정리
 setInterval(() => {
   for (const ws of wss.clients) {
-    if (!ws.isAlive) { ws.terminate(); continue; }
-    ws.isAlive = false; ws.ping();
+    if (ws._dead) { ws.terminate(); continue; }
+    ws._dead = true; ws.ping(); ws.once('pong', () => { ws._dead = false; });
   }
 }, 30000);
 
-server.listen(PORT, () => console.log(`LowPoly Racer 서버 실행 중: http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`Server listening on port ${PORT}`));

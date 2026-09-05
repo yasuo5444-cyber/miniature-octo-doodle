@@ -1,104 +1,87 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>LowPoly Racer — 4인 온라인 레이싱</title>
-<link rel="stylesheet" href="style.css">
-<script type="importmap">
-{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
-</script>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Lowpoly Racer</title>
+<link rel="stylesheet" href="style.css" />
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
 </head>
 <body>
-<canvas id="gl"></canvas>
+<canvas id="game"></canvas>
 
-<!-- 로비 -->
-<div id="lobby" class="screen">
-  <div class="panel">
+<div id="lobby" class="overlay">
+  <div id="screen-enter" class="panel">
     <h1>LOWPOLY RACER</h1>
-    <p class="sub">친구 4명과 즐기는 온라인 서킷 레이싱 · 방 코드로 초대</p>
+    <p class="sub">친구와 4인 온라인 레이싱 · 5개 맵</p>
+    <label>닉네임 <input id="name" maxlength="12" placeholder="닉네임" /></label>
+    <div class="row"><button id="btn-create" class="primary">방 만들기</button></div>
+    <div class="row"><input id="code" maxlength="6" placeholder="방 코드 6자리" style="text-transform:uppercase" /><button id="btn-join">방 참가</button></div>
+    <label>그래픽 <select id="quality"><option value="1">보통</option><option value="0">낮음 (저사양)</option></select></label>
+    <div class="help">
+      <b>W/↑</b> 가속 · <b>S/↓</b> 브레이크/후진 · <b>A/D, ←/→</b> 조향<br/>
+      <b>Shift</b> 드리프트(니트로 충전) · <b>Ctrl</b> 니트로 · <b>C</b> 카메라 · <b>R</b> 트랙 복귀 · <b>M</b> 음소거
+    </div>
+    <div id="conn" class="conn"></div>
+  </div>
 
-    <div id="entry">
-      <div class="row">
-        <label>닉네임<input id="name" maxlength="12" placeholder="닉네임 (최대 12자)"></label>
-        <label>그래픽<select id="quality"><option value="normal">보통</option><option value="low">낮음 (저사양)</option></select></label>
+  <div id="screen-room" class="panel wide hidden">
+    <div class="room-head">
+      <div>방 코드 <b id="room-code">------</b></div>
+      <button id="btn-invite">초대 링크 복사</button>
+      <button id="btn-leave" class="ghost">나가기</button>
+    </div>
+    <div class="room-body">
+      <div class="col">
+        <h3>참가자</h3>
+        <ul id="players"></ul>
+        <label>랩 수 <select id="laps"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select></label>
+        <button id="btn-ready" class="primary">준비</button>
+        <button id="btn-start" class="primary">경기 시작</button>
       </div>
-      <div class="row">
-        <button id="btnCreate" class="primary">방 만들기</button>
-      </div>
-      <div class="row">
-        <input id="code" maxlength="6" placeholder="6자리 방 코드" inputmode="numeric" autocomplete="off">
-        <button id="btnJoin">참가</button>
-      </div>
-      <div class="hint">
-        조작 — W/↑ 가속 · S/↓ 브레이크·후진 · A D/← → 조향 · <b>Shift 드리프트</b>(니트로 충전) · <b>Ctrl 니트로</b> · R 트랙 복귀 · C 카메라 · M 음소거
+      <div class="col grow">
+        <h3>맵 <span id="host-hint" class="dim"></span></h3>
+        <div id="maps" class="map-grid"></div>
+        <div class="preview-row">
+          <canvas id="preview" width="220" height="160"></canvas>
+          <div><div id="map-info"></div><button id="btn-reroll" class="hidden">🎲 새 트랙 뽑기</button></div>
+        </div>
       </div>
     </div>
-
-    <div id="roomView" class="hidden">
-      <div class="codebox">방 코드 <b id="roomCode">------</b> <button id="btnCopy" class="small">초대 링크 복사</button></div>
-      <ul id="playerList"></ul>
-      <div class="row">
-        <label>랩 수<select id="laps"><option>1</option><option>2</option><option selected>3</option><option>5</option></select></label>
-        <button id="btnNewTrack" class="small">🎲 새 트랙</button>
-      </div>
-      <div id="trackPreviewWrap"><canvas id="trackPreview" width="220" height="220"></canvas></div>
-      <div class="row">
-        <button id="btnReady" class="primary">준비 완료</button>
-        <button id="btnStart" class="primary">경기 시작</button>
-        <button id="btnLeave" class="small">나가기</button>
-      </div>
-      <div id="lobbyMsg" class="hint"></div>
-    </div>
-    <div id="errMsg" class="err"></div>
   </div>
 </div>
 
-<!-- HUD -->
 <div id="hud" class="hidden">
-  <div id="topLeft">
-    <div id="lapInfo">LAP <b id="lap">1</b>/<span id="lapsTotal">3</span></div>
-    <div id="pos"><b id="place">1</b><span id="placeSuffix">st</span> / <span id="total">1</span></div>
-  </div>
-  <div id="times">
-    <div>TIME<span id="curTime">0:00.000</span></div>
-    <div>LAST<span id="lastLap">--:--.---</span></div>
-    <div>BEST<span id="bestLap">--:--.---</span></div>
-    <div class="dim">PING<span id="ping">-</span>ms</div>
-  </div>
-  <div id="standings"></div>
+  <div id="hud-top"><span id="hud-map"></span><span id="hud-lap">LAP 1/3</span><span id="hud-pos">-</span></div>
+  <div id="hud-times"><div>LAP <b id="hud-cur">0:00.000</b></div><div>LAST <b id="hud-last">--:--.---</b></div><div>BEST <b id="hud-best">--:--.---</b></div></div>
+  <ul id="leaderboard"></ul>
   <canvas id="minimap" width="180" height="180"></canvas>
-  <div id="speedo">
-    <div><span id="speed">0</span><small>km/h</small></div>
-    <div id="nitroBar"><div id="nitroFill"></div></div>
-    <div id="nitroLabel">NITRO — Shift 드리프트로 충전, Ctrl 사용</div>
+  <div id="hud-bottom">
+    <div id="speedo"><span id="hud-speed">0</span><small>km/h</small></div>
+    <div id="nitro"><div id="nitro-fill"></div><span>NITRO — Shift 드리프트로 충전, Ctrl 사용</span></div>
   </div>
-  <div id="center">
-    <div id="countdown"></div>
-    <div id="wrongWay" class="hidden">▼ WRONG WAY ▼</div>
-    <div id="notice"></div>
-  </div>
-  <div id="feed"></div>
-  <div id="touch" class="hidden">
-    <div class="grp"><button data-k="left">◀</button><button data-k="right">▶</button></div>
-    <div class="grp"><button data-k="nitro">N</button><button data-k="drift">D</button><button data-k="brake">▼</button><button data-k="acc">▲</button></div>
+  <div id="wrongway" class="hidden">⚠ 역주행</div>
+  <div id="airtime" class="hidden">AIR!</div>
+  <div id="hud-ping"></div>
+</div>
+
+<div id="countdown" class="hidden"></div>
+
+<div id="touch" class="hidden">
+  <div class="tl"><button data-k="left">◀</button><button data-k="right">▶</button></div>
+  <div class="tr"><button data-k="nitro">🔥</button><button data-k="drift">DRIFT</button><button data-k="down">▼</button><button data-k="up">▲</button></div>
+</div>
+
+<div id="results" class="overlay hidden">
+  <div class="panel wide">
+    <h2>🏁 경기 결과 <span id="results-map" class="dim"></span></h2>
+    <table><thead><tr><th>#</th><th>플레이어</th><th>기록</th><th>베스트 랩</th></tr></thead><tbody id="results-body"></tbody></table>
+    <div id="host-actions" class="row"><button id="btn-rematch" class="primary">같은 맵 재경기</button><button id="btn-tolobby">로비로 (다른 맵 선택)</button></div>
+    <div id="guest-wait" class="dim">호스트가 재경기 또는 로비 복귀를 선택하길 기다리는 중…</div>
   </div>
 </div>
 
-<!-- 결과 -->
-<div id="results" class="screen hidden">
-  <div class="panel">
-    <h2>🏁 RACE RESULTS</h2>
-    <table id="resultTable"></table>
-    <div class="row" id="rematchRow">
-      <button id="btnRematchSame" class="primary">같은 트랙 재경기</button>
-      <button id="btnRematchNew">새 트랙 재경기</button>
-    </div>
-    <div id="resultsMsg" class="hint"></div>
-    <div class="row"><button id="btnLeave2" class="small">방 나가기</button></div>
-  </div>
-</div>
-
+<div id="toasts"></div>
 <script type="module" src="main.js"></script>
 </body>
 </html>
