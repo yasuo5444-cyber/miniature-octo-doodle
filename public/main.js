@@ -10,14 +10,16 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const fmtTime = (ms) => { if (ms == null) return '--:--.---'; ms = Math.max(0, Math.round(ms)); const m = Math.floor(ms / 60000), s = Math.floor(ms / 1000) % 60, x = ms % 1000; return `${m}:${String(s).padStart(2, '0')}.${String(x).padStart(3, '0')}`; };
 const show = (el, on) => el.classList.toggle('hidden', !on);
 const isTouch = matchMedia('(pointer: coarse)').matches;
+const COLORS = ['#ff4b4b', '#ff8c2a', '#ffd23f', '#4bff8a', '#2ad4b0', '#3fa9ff', '#7d5cff', '#ff5cc8', '#ffffff', '#9aa3ad', '#3b3f45', '#c8a45a'];
+let myColor = localStorage.getItem('racer_color') || COLORS[0]; // 저장된 색상이 없으면 첫 번째 색상(빨강)
 
 // ---------- 주행 튜닝 상수 ----------
 const P = {
-  maxSpeed: 52, accel: 22, brake: 28, reverseMax: 12, drag: 0.0006, roll: 0.04, engineBrake: 0.12,
-  grip: 8, driftGrip: 2.0, steer: 1.7, driftSteer: 1.35,
-  nitroSpeed: 16, nitroAccel: 18, nitroUse: 42, nitroCharge: 30,
-  padSpeed: 14, padTime: 1.4, grassMax: 22, grassDrag: 1.5,
-  gravity: 20, collideR: 2.3,
+    maxSpeed: 42, accel: 18, brake: 28, reverseMax: 12, drag: 0.0006, roll: 0.04, engineBrake: 0.12,
+    grip: 8, driftGrip: 2.0, steer: 1.7, driftSteer: 1.35,
+    nitroSpeed: 14, nitroAccel: 15, nitroUse: 65, nitroCharge: 15, // 부스터 소모는 빠르게(65), 충전은 느리게(15)
+    padSpeed: 14, padTime: 1.4, grassMax: 22, grassDrag: 1.5,
+    gravity: 20, collideR: 2.3,
 };
 const NO_INPUT = { up: false, down: false, left: false, right: false, drift: false, nitro: false };
 
@@ -109,6 +111,25 @@ function drawMinimap() {
 
 // ---------- 로비 UI ----------
 const nameInput = $('name'), codeInput = $('code');
+// --- 메인 화면 색상 팔레트 생성 ---
+const preCp = $('pre-color-picker');
+if (preCp) {
+    COLORS.forEach(c => {
+        const btn = document.createElement('div');
+        btn.className = 'color-btn';
+        btn.style.backgroundColor = c;
+        if (c === myColor) btn.classList.add('sel'); // 내가 고른 색상 테두리 표시
+
+        btn.onclick = () => {
+            myColor = c;
+            localStorage.setItem('racer_color', c); // 다음 접속 때도 유지되게 저장
+            Array.from(preCp.children).forEach(b => b.classList.remove('sel')); // 다른 테두리 끄기
+            btn.classList.add('sel'); // 클릭한 것에 테두리 켜기
+        };
+        preCp.appendChild(btn);
+    });
+}
+// ---------------------------------
 nameInput.value = localStorage.getItem('racer_name') || '';
 const params = new URLSearchParams(location.search);
 if (params.get('room')) codeInput.value = params.get('room').toUpperCase();
@@ -167,7 +188,12 @@ net.on('_open', () => { $('conn').textContent = ''; });
 net.on('_close', () => { $('conn').textContent = '서버 연결 끊김 — 새로고침하세요'; toast('서버와 연결이 끊어졌습니다. 새로고침하세요.', 8000); });
 net.on('error', m => toast(m.msg || '오류'));
 net.on('welcome', m => { app.me = { id: m.id }; });
-net.on('joined', m => { app.me = { id: m.id }; app.phase = 'lobby'; show($('screen-enter'), false); show($('screen-room'), true); history.replaceState(null, '', `${location.pathname}?room=${m.code}`); });
+net.on('joined', m => {
+    app.me = { id: m.id }; app.phase = 'lobby'; show($('screen-enter'), false); show($('screen-room'), true); history.replaceState(null, '', `${location.pathname}?room=${m.code}`);
+
+    // 👇 방에 입장하자마자 서버에 내가 찜한 색상 보내기 (이 줄이 꼭 있어야 합니다!)
+    net.send('color', { color: myColor });
+});
 net.on('room', m => {
   app.room = m;
   if (m.state === 'lobby' && app.phase !== 'lobby' && app.phase !== 'enter') toLobby();
@@ -218,12 +244,15 @@ function showResults(m) {
 // ---------- 차량 ----------
 function clearCars() { for (const c of app.cars.values()) { scene.remove(c.group); c.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); } app.cars.clear(); }
 function spawnCar(p) {
-  const sp = app.track.spawn(p.slot), car = buildCar(p.color), local = p.id === app.me.id;
-  car.group.position.set(sp.x, sp.y, sp.z); car.group.rotation.y = sp.a;
-  const c = { id: p.id, name: p.name, color: p.color, ...car, local, target: null, hasTarget: false, x: sp.x, y: sp.y, z: sp.z, a: sp.a, v: 0, pitch: 0, hint: sp.i };
-  if (!local) { const spr = makeNameSprite(p.name, p.color); spr.position.y = 2.8; car.group.add(spr); }
-  scene.add(car.group); app.cars.set(p.id, c);
-  if (local) app.local = { x: sp.x, y: sp.y, z: sp.z, vx: 0, vz: 0, vy: 0, a: sp.a, hint: sp.i, n: null, airborne: false, airTime: 0, drifting: false, slip: 0, nitro: 0, nitroOn: false, padBoost: 0, padLast: null, wrong: 0, shake: 0, camYaw: sp.a, offRoad: false, speed: 0, fs: 0, steerVis: 0, pitchTarget: 0, landBurst: 0 };
+    // p.slot 대신 p.grid 를 사용하여 위치를 랜덤으로 배정합니다.
+    const sp = app.track.spawn(p.grid), car = buildCar(p.color), local = p.id === app.me.id;
+    car.group.position.set(sp.x, sp.y, sp.z); car.group.rotation.y = sp.a;
+
+    const c = { id: p.id, name: p.name, color: p.color, ...car, local, target: null, hasTarget: false, x: sp.x, y: sp.y, z: sp.z, a: sp.a, v: 0, pitch: 0, hint: sp.i };
+    if (!local) { const spr = makeNameSprite(p.name, p.color); spr.position.y = 2.8; car.group.add(spr); }
+    scene.add(car.group); app.cars.set(p.id, c);
+
+    if (local) app.local = { x: sp.x, y: sp.y, z: sp.z, vx: 0, vz: 0, vy: 0, a: sp.a, hint: sp.i, n: null, airborne: false, airTime: 0, drifting: false, slip: 0, nitro: 0, nitroOn: false, padBoost: 0, padLast: null, wrong: 0, shake: 0, camYaw: sp.a, offRoad: false, speed: 0, fs: 0, steerVis: 0, pitchTarget: 0, landBurst: 0 };
 }
 
 // ---------- 입력 ----------
@@ -258,91 +287,138 @@ function resetCar() {
 
 // ---------- 물리 (로컬 차량) ----------
 function stepLocal(dt, control) {
-  const L = app.local, T = app.track, inp = control ? input : NO_INPUT;
-  const fwdX = Math.sin(L.a), fwdZ = Math.cos(L.a);
-  const fs0 = L.vx * fwdX + L.vz * fwdZ, speed = Math.hypot(L.vx, L.vz);
-  const n = T.nearest(L.x, L.z, L.hint); L.hint = n.i;
-  const onRoad = Math.abs(n.lat) <= TRACK_WIDTH + 0.5; L.offRoad = !onRoad;
-  L.drifting = inp.drift && speed > 8 && !L.airborne;
-  L.nitroOn = inp.nitro && L.nitro > 0 && !L.airborne && fs0 > 1;
-  if (L.nitroOn) L.nitro = Math.max(0, L.nitro - P.nitroUse * dt);
-  // 조향 (a 증가 = 좌회전)
-  const steer = (inp.left ? 1 : 0) - (inp.right ? 1 : 0), dir = fs0 >= -0.5 ? 1 : -1;
-  let turn = steer * P.steer * Math.min(1, speed / 7) / (1 + speed / 60) * (L.drifting ? P.driftSteer : 1) * dir;
-  if (L.airborne) turn *= 0.25;
-  L.a += turn * dt;
-  L.steerVis += (steer - L.steerVis) * Math.min(1, dt * 10);
-  // 종방향
-  const maxS = P.maxSpeed + (L.nitroOn ? P.nitroSpeed : 0) + (L.padBoost > 0 ? P.padSpeed : 0);
-  let acc = 0;
-  if (!L.airborne) {
-    if (inp.up) acc += (P.accel + (L.nitroOn ? P.nitroAccel : 0)) * Math.max(0, 1 - fs0 / maxS);
-    else if (!inp.down) acc -= fs0 * P.engineBrake;
-    if (inp.down) acc += fs0 > 0.5 ? -P.brake : (fs0 > -P.reverseMax ? -P.accel * 0.5 : 0);
-    if (!onRoad) { acc -= fs0 * P.grassDrag; if (Math.abs(fs0) > P.grassMax) acc -= Math.sign(fs0) * 10; }
-    const sl = n.slope * (fwdX * n.dx + fwdZ * n.dz);          // 진행방향 경사
-    acc -= P.gravity * sl / Math.sqrt(1 + sl * sl);             // 오르막 감속 / 내리막 가속
-    L.pitchTarget = -Math.atan(sl);
-  } else L.pitchTarget = -Math.atan2(L.vy, Math.max(5, speed)) * 0.7;
-  acc -= fs0 * Math.abs(fs0) * P.drag + fs0 * P.roll;
-  if (!control) acc = 0;
-  if (L.padBoost > 0) L.padBoost -= dt;
-  // 새 헤딩 축으로 속도 재구성: 전방 성분 + 감쇠하는 횡 성분(드리프트)
-  const fX = Math.sin(L.a), fZ = Math.cos(L.a), rX = -fZ, rZ = fX;
-  let f = L.vx * fX + L.vz * fZ + acc * dt, l = L.vx * rX + L.vz * rZ;
-  if (!control) f *= Math.exp(-3 * dt);
-  const grip = L.airborne ? 0.2 : (L.drifting ? P.driftGrip : (onRoad ? P.grip : 4.5));
-  l *= Math.exp(-grip * dt);
-  L.slip = Math.atan2(Math.abs(l), Math.abs(f) + 0.01);
-  if (L.drifting && L.slip > 0.1) L.nitro = Math.min(100, L.nitro + P.nitroCharge * dt * Math.min(1, L.slip * 4));
-  L.vx = fX * f + rX * l; L.vz = fZ * f + rZ * l;
-  L.x += L.vx * dt; L.z += L.vz * dt;
-  // 벽 충돌
-  const n2 = T.nearest(L.x, L.z, L.hint); L.hint = n2.i; L.n = n2;
-  const limit = TRACK_WIDTH + WALL_OFFSET - 1.0;
-  if (Math.abs(n2.lat) > limit && L.y < n2.gy + 1.3) {
-    const s = Math.sign(n2.lat);
-    L.x = n2.cx + n2.rx * s * limit; L.z = n2.cz + n2.rz * s * limit;
-    const vn = L.vx * n2.rx + L.vz * n2.rz;
-    if (vn * s > 0) {
-      L.vx -= vn * n2.rx * 1.4; L.vz -= vn * n2.rz * 1.4; L.vx *= 0.85; L.vz *= 0.85;
-      const k = Math.min(1, Math.abs(vn) / 20); L.shake = Math.max(L.shake, k * 0.8); sfx.thud(k);
-    }
-    n2.lat = s * limit;
-  }
-  // 지면 / 공중 (램프 끝·급한 정점에서 자연스럽게 이륙)
-  const gy = T.groundY(n2);
-  if (L.airborne) {
-    L.vy -= P.gravity * dt; L.y += L.vy * dt; L.airTime += dt;
-    if (L.y <= gy) {
-      const impact = -L.vy; L.y = gy; L.airborne = false; L.vy = 0; L.airTime = 0;
-      if (impact > 6) { L.shake = Math.max(L.shake, Math.min(1, impact / 18)); L.vx *= 0.92; L.vz *= 0.92; sfx.land(Math.min(1, impact / 18)); L.landBurst = 14; }
-    }
-  } else {
-    const yAir = L.y + L.vy * dt - 0.5 * P.gravity * dt * dt;
-    if (gy < yAir - 0.06) { L.airborne = true; L.y = yAir; L.airTime = 0; }
-    else { L.vy = (gy - L.y) / dt; L.y = gy; }
-  }
-  // 부스트 패드
-  if (!L.airborne) {
-    const pad = T.padAt(n2.i, n2.lat);
-    if (pad && L.padLast !== pad) { L.padLast = pad; L.padBoost = P.padTime; L.nitro = Math.min(100, L.nitro + 30); const sp = Math.hypot(L.vx, L.vz), k = (sp + 8) / (sp || 1); L.vx *= k; L.vz *= k; sfx.boost(); }
-    else if (!pad) L.padLast = null;
-  }
-  // 역주행
-  if (fX * n2.dx + fZ * n2.dz < -0.4 && f > 4) L.wrong += dt; else L.wrong = 0;
-  // 차량 간 충돌 (상대는 자기 쪽에서 처리)
-  for (const c of app.cars.values()) {
-    if (c.local) continue;
-    const ddx = L.x - c.x, ddz = L.z - c.z, d = Math.hypot(ddx, ddz);
-    if (d < P.collideR && d > 0.01 && Math.abs(L.y - c.y) < 1.5) {
-      const nx = ddx / d, nz = ddz / d; L.x += nx * (P.collideR - d); L.z += nz * (P.collideR - d);
-      const vn = L.vx * nx + L.vz * nz; if (vn < 0) { L.vx -= vn * nx * 1.5; L.vz -= vn * nz * 1.5; L.shake = Math.max(L.shake, 0.3); sfx.thud(0.4); }
-    }
-  }
-  L.speed = Math.hypot(L.vx, L.vz); L.fs = f;
-}
+    const L = app.local, T = app.track, inp = control ? input : NO_INPUT;
+    const fwdX = Math.sin(L.a), fwdZ = Math.cos(L.a);
+    const fs0 = L.vx * fwdX + L.vz * fwdZ, speed = Math.hypot(L.vx, L.vz);
+    const n = T.nearest(L.x, L.z, L.hint); L.hint = n.i;
+    const onRoad = Math.abs(n.lat) <= TRACK_WIDTH + 0.5; L.offRoad = !onRoad;
+    L.drifting = inp.drift && speed > 8 && !L.airborne;
+    L.nitroOn = inp.nitro && L.nitro > 0 && !L.airborne && fs0 > 1;
+    if (L.nitroOn) L.nitro = Math.max(0, L.nitro - P.nitroUse * dt);
+    // 조향 (a 증가 = 좌회전)
+    const steer = (inp.left ? 1 : 0) - (inp.right ? 1 : 0), dir = fs0 >= -0.5 ? 1 : -1;
+    let turn = steer * P.steer * Math.min(1, speed / 7) / (1 + speed / 60) * (L.drifting ? P.driftSteer : 1) * dir;
+    if (L.airborne) turn *= 0.25;
+    L.a += turn * dt;
+    L.steerVis += (steer - L.steerVis) * Math.min(1, dt * 10);
+    // 종방향
+    const maxS = P.maxSpeed + (L.nitroOn ? P.nitroSpeed : 0) + (L.padBoost > 0 ? P.padSpeed : 0);
+    let acc = 0;
+    if (!L.airborne) {
+        if (inp.up) acc += (P.accel + (L.nitroOn ? P.nitroAccel : 0)) * Math.max(0, 1 - fs0 / maxS);
+        else if (!inp.down) acc -= fs0 * P.engineBrake;
+        if (inp.down) acc += fs0 > 0.5 ? -P.brake : (fs0 > -P.reverseMax ? -P.accel * 0.5 : 0);
+        if (!onRoad) { acc -= fs0 * P.grassDrag; if (Math.abs(fs0) > P.grassMax) acc -= Math.sign(fs0) * 10; }
+        const sl = n.slope * (fwdX * n.dx + fwdZ * n.dz);          // 진행방향 경사
+        acc -= P.gravity * sl / Math.sqrt(1 + sl * sl);             // 오르막 감속 / 내리막 가속
+        L.pitchTarget = -Math.atan(sl);
+    } else L.pitchTarget = -Math.atan2(L.vy, Math.max(5, speed)) * 0.7;
+    acc -= fs0 * Math.abs(fs0) * P.drag + fs0 * P.roll;
+    if (!control) acc = 0;
+    if (L.padBoost > 0) L.padBoost -= dt;
+    // 새 헤딩 축으로 속도 재구성: 전방 성분 + 감쇠하는 횡 성분(드리프트)
+    const fX = Math.sin(L.a), fZ = Math.cos(L.a), rX = -fZ, rZ = fX;
+    let f = L.vx * fX + L.vz * fZ + acc * dt, l = L.vx * rX + L.vz * rZ;
+    if (!control) f *= Math.exp(-3 * dt);
+    const grip = L.airborne ? 0.2 : (L.drifting ? P.driftGrip : (onRoad ? P.grip : 4.5));
+    l *= Math.exp(-grip * dt);
+    L.slip = Math.atan2(Math.abs(l), Math.abs(f) + 0.01);
+    if (L.drifting && L.slip > 0.1) L.nitro = Math.min(100, L.nitro + P.nitroCharge * dt * Math.min(1, L.slip * 4));
+    L.vx = fX * f + rX * l; L.vz = fZ * f + rZ * l;
+    L.x += L.vx * dt; L.z += L.vz * dt;
+    // 벽 충돌 (미끄러지듯 스쳐 지나가도록 수정)
+    const n2 = T.nearest(L.x, L.z, L.hint); L.hint = n2.i; L.n = n2;
+    const limit = TRACK_WIDTH + WALL_OFFSET - 1.0;
 
+    if (Math.abs(n2.lat) > limit && L.y < n2.gy + 1.3) {
+        const s = Math.sign(n2.lat);
+
+        // 1. 차가 벽을 뚫고 나가지 못하게 위치 즉시 보정
+        L.x = n2.cx + n2.rx * s * limit;
+        L.z = n2.cz + n2.rz * s * limit;
+
+        // 2. 벽 방향으로 뚫고 들어가려는 힘(법선 속도) 계산
+        const vn = L.vx * n2.rx + L.vz * n2.rz;
+
+        if (vn * s > 0) {
+            // 3. 벽을 파고드는 힘만 반대로 튕겨냄 (1.2 = 반발력 약하게 설정)
+            L.vx -= vn * n2.rx * 1.2;
+            L.vz -= vn * n2.rz * 1.2;
+
+            // 4. 벽에 긁힐 때의 마찰력 (0.85 -> 0.98로 변경하여 전진 속도 유지)
+            L.vx *= 0.98;
+            L.vz *= 0.98;
+
+            const k = Math.min(1, Math.abs(vn) / 20);
+            L.shake = Math.max(L.shake, k * 0.8);
+            sfx.thud(k);
+        }
+        n2.lat = s * limit;
+    }
+    // 지면 / 공중 (램프 끝·급한 정점에서 자연스럽게 이륙)
+    const gy = T.groundY(n2);
+    if (L.airborne) {
+        L.vy -= P.gravity * dt; L.y += L.vy * dt; L.airTime += dt;
+        if (L.y <= gy) {
+            const impact = -L.vy; L.y = gy; L.airborne = false; L.vy = 0; L.airTime = 0;
+            if (impact > 6) { L.shake = Math.max(L.shake, Math.min(1, impact / 18)); L.vx *= 0.92; L.vz *= 0.92; sfx.land(Math.min(1, impact / 18)); L.landBurst = 14; }
+        }
+    } else {
+        const yAir = L.y + L.vy * dt - 0.5 * P.gravity * dt * dt;
+        if (gy < yAir - 0.06) { L.airborne = true; L.y = yAir; L.airTime = 0; }
+        else { L.vy = (gy - L.y) / dt; L.y = gy; }
+    }
+    // 부스트 패드
+    if (!L.airborne) {
+        const pad = T.padAt(n2.i, n2.lat);
+        if (pad && L.padLast !== pad) { L.padLast = pad; L.padBoost = P.padTime; L.nitro = Math.min(100, L.nitro + 30); const sp = Math.hypot(L.vx, L.vz), k = (sp + 8) / (sp || 1); L.vx *= k; L.vz *= k; sfx.boost(); }
+        else if (!pad) L.padLast = null;
+    }
+    // 역주행
+    if (fX * n2.dx + fZ * n2.dz < -0.4 && f > 4) L.wrong += dt; else L.wrong = 0;
+    // 차량 간 충돌 (상대는 자기 쪽에서 처리)
+    for (const c of app.cars.values()) {
+        if (c.local) continue;
+        const ddx = L.x - c.x, ddz = L.z - c.z, d = Math.hypot(ddx, ddz);
+
+        if (d < P.collideR && d > 0.01 && Math.abs(L.y - c.y) < 1.5) {
+            // 충돌 방향 법선 벡터 (상대차 -> 내 차)
+            const nx = ddx / d, nz = ddz / d;
+
+            // 1. 겹침 방지 (서로 파고들지 않게 즉시 밖으로 밀어냄)
+            L.x += nx * (P.collideR - d);
+            L.z += nz * (P.collideR - d);
+
+            // 2. 상대방(원격) 차량의 현재 X, Z 방향 이동 속도 추정
+            const cvx = Math.sin(c.a) * c.v;
+            const cvz = Math.cos(c.a) * c.v;
+
+            // 3. 상대 속도 계산 (내 속도 - 상대 속도)
+            const dvx = L.vx - cvx;
+            const dvz = L.vz - cvz;
+            const vn = dvx * nx + dvz * nz; // 충돌 축으로의 접근 속도
+
+            // vn < 0: 서로 가까워지고 있을 때만 운동량 변화 적용
+            if (vn < 0) {
+                // 반발 계수 (0.4: 범퍼카처럼 튕기지 않고 묵직하게 밀림)
+                const bounce = 0.4;
+                L.vx -= vn * nx * (1 + bounce);
+                L.vz -= vn * nz * (1 + bounce);
+
+                L.shake = Math.max(L.shake, Math.min(1, Math.abs(vn) / 10));
+                sfx.thud(Math.min(1, Math.abs(vn) / 15));
+            }
+
+            // 4. 측면 마찰 및 밀어내기 (옆으로 나란히 달릴 때의 상호작용)
+            // 옆으로 비비면 바깥쪽으로 지속적인 힘(Side Push)을 받고 마찰로 인해 살짝 감속됨
+            const sidePush = 2.5;
+            L.vx += nx * sidePush * dt;
+            L.vz += nz * sidePush * dt;
+            L.vx *= 0.99; // 마찰로 인한 속도 감소
+            L.vz *= 0.99;
+        }
+    }
+}
 function animateCar(c, dt, fs, steer, nitro, braking) {
   for (const w of c.wheels) w.rotation.x += fs * dt / 0.38;
   for (const p of c.front) p.rotation.y = steer * 0.45;

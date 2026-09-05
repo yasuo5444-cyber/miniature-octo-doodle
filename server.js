@@ -51,14 +51,13 @@ function createRoom() {
 }
 
 function addPlayer(room, p) {
-    // [수정됨] 치명적 오류 1 해결: used 변수 오타 수정
     const usedSlots = new Set([...room.players.values()].map(q => q.slot));
     p.slot = [0, 1, 2, 3].find(s => !usedSlots.has(s)) ?? 0;
 
     const usedC = new Set([...room.players.values()].map(q => q.color));
     p.color = COLORS.find(c => !usedC.has(c)) || COLORS[p.slot];
 
-    // [수정됨] 치명적 오류 2 해결: 플레이어 객체에 현재 방 정보를 명시적으로 연결
+    // 🚨 이 부분이 반드시 있어야 대기방에서 나갔을 때 즉시 사라집니다!
     p.room = room;
 
     room.players.set(p.id, p);
@@ -210,6 +209,26 @@ wss.on('connection', (ws) => {
                 send(ws, 'joined', { id: p.id, code: r.code }); pushRoom(r); break;
             }
             case 'ready': if (room && room.state === 'lobby') { p.ready = !!m.ready; pushRoom(room); } break;
+            case 'left': {
+                console.log("플레이어 퇴장:", m.id); // 확인용 로그
+
+                // 1. 인게임(레이싱 중)일 때 화면에서 자동차 삭제
+                // ⚠ 주의: 'remotePlayers'라는 변수명은 실제 님의 코드에서 상대방 차들을 저장하는 
+                // 배열이나 객체 이름(예: opponents, otherCars 등)으로 바꿔야 합니다.
+                if (typeof remotePlayers !== 'undefined' && remotePlayers[m.id]) {
+                    // Three.js 씬(Scene)에서 해당 유저의 3D 자동차 모델 제거
+                    if (remotePlayers[m.id].mesh) {
+                        scene.remove(remotePlayers[m.id].mesh);
+                    }
+                    // 메모리(객체)에서 해당 유저 데이터 완전 삭제
+                    delete remotePlayers[m.id];
+                }
+
+                // 2. 만약 UI(순위표 등)를 다시 그려야 한다면 여기서 관련 함수 호출
+                // 예: updateLeaderboard();
+
+                break;
+            }
             case 'settings': {
                 if (!host || room.state !== 'lobby') break;
                 if (LAP_CHOICES.includes(+m.laps)) room.settings.laps = +m.laps;
@@ -250,6 +269,6 @@ setInterval(() => {
         if (ws._dead) { ws.terminate(); continue; }
         ws._dead = true; ws.ping(); ws.once('pong', () => { ws._dead = false; });
     }
-}, 8000);
+}, 1500); // 2초마다 빡세게 검사해서 바로바로 쳐냄!
 
 server.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
