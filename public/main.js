@@ -207,15 +207,34 @@ net.on('room', m => {
 net.on('left', m => { const c = app.cars.get(m.id); if (c) { toast(`${c.name} 님이 나갔습니다`); scene.remove(c.group); app.cars.delete(m.id); } });
 net.on('pong', m => { net.ping = Math.round(performance.now() - m.t); });
 net.on('race_start', m => {
-    app.phase = 'countdown'; app.finished = false; app.laps = m.laps; app.ranks = []; app.lapInfo = { lap: 0, last: null, best: null };
-    loadTrack(m.mapId, m.seed);
-    show($('lobby'), false); show($('results'), false); show($('hud'), true); show($('touch'), isTouch);
-    clearCars(); for (const p of m.players) spawnCar(p);
+    app.phase = 'countdown';
+    app.finished = false;
+    app.laps = m.laps || (app.room ? app.room.settings.laps : 3);
+    app.ranks = [];
+    app.lapInfo = { lap: 0, last: null, best: null };
 
-    camInit = false; // 👈 이 코드가 있어야 내 차 기준으로 카메라가 다시 세팅됩니다!
+    const mapId = m.mapId || (app.room ? app.room.settings.mapId : 'sunset');
+    const seed = m.seed || (app.room ? app.room.settings.seed : 1);
+    loadTrack(mapId, seed);
+
+    show($('lobby'), false); show($('results'), false); show($('hud'), true); show($('touch'), isTouch);
+
+    clearCars();
+
+    // 🚨 핵심 포인트: 서버에서 m.players를 주지 않을 경우 방의 참가자 목록을 알아서 사용하도록 2중 방어!
+    const playersList = m.players || (app.room ? app.room.players : []);
+    for (const p of playersList) {
+        if (p) spawnCar(p);
+    }
+
+    camInit = false;
     sfx.init();
-    $('hud-map').textContent = `${MAPS[m.mapId].icon} ${MAPS[m.mapId].name}`; $('hud-lap').textContent = `LAP 1/${m.laps}`;
-    runCountdown(m.startIn);
+
+    if (MAPS[mapId]) {
+        $('hud-map').textContent = `${MAPS[mapId].icon} ${MAPS[mapId].name}`;
+    }
+    $('hud-lap').textContent = `LAP 1/${app.laps}`;
+    runCountdown(m.startIn || 3000);
 });
 net.on('go', () => { app.phase = 'racing'; app.goTime = app.lapStartPerf = performance.now(); sfx.go(); });
 net.on('states', m => {
@@ -251,10 +270,14 @@ function showResults(m) {
 // ---------- 차량 ----------
 function clearCars() { for (const c of app.cars.values()) { scene.remove(c.group); c.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); } app.cars.clear(); }
 function spawnCar(p) {
-    // 👇 핵심: === 대신 == 를 사용하여 문자/숫자 형태가 달라도 내 차로 찰떡같이 인식하게 만듭니다.
-    const local = (p.id == app.me.id);
+    if (!p) return; // p가 빈 값일 경우 멈춤 방지
+    const myId = app.me ? app.me.id : app.myId;
+    const local = (p.id == myId);
 
-    const sp = app.track.spawn(p.grid), car = buildCar(p.color);
+    // 🚨 p.grid나 p.slot 값이 누락되었을 경우 에러가 나지 않도록 0을 기본값으로 강제 지정
+    const gridPos = p.grid !== undefined ? p.grid : (p.slot !== undefined ? p.slot : 0);
+    const sp = app.track.spawn(gridPos), car = buildCar(p.color || '#ffffff');
+
     car.group.position.set(sp.x, sp.y, sp.z);
     car.group.rotation.y = sp.a;
 
@@ -449,25 +472,26 @@ function animateCar(c, dt, fs, steer, nitro, braking) {
 }
 function updateLocalVisual(dt) {
     const L = app.local;
-    // 👇 Map 키(Key) 문제로 차를 못 찾는 현상 방지: local이 true인 차를 직접 찾습니다!
     let c = null;
     for (const car of app.cars.values()) {
         if (car.local) { c = car; break; }
     }
     if (!c) return;
-  c.x = L.x; c.y = L.y; c.z = L.z; c.a = L.a; c.v = L.speed;
-  c.group.position.set(L.x, L.y, L.z);
-  c.pitch += (L.pitchTarget - c.pitch) * Math.min(1, dt * 6);
-  c.group.rotation.set(c.pitch, L.a, -L.steerVis * 0.06 * Math.min(1, L.speed / 25));
-  animateCar(c, dt, L.fs, L.steerVis, L.nitroOn, input.down && L.fs > 0.5);
-    const fX = Math.sin(L.a), fZ = Math.cos(L.a), rX = -fZ, rZ = fX, R = () => Math.random() - 0.5
-  , rZ = fX, R = () => Math.random() - 0.5;
-  if (!L.airborne && L.speed > 6) {
-    if (L.drifting && L.slip > 0.12) for (const s of [-1, 1]) if (Math.random() < 0.7) particles.emit(L.x + rX * s * 0.9 - fX * 1.4, L.y + 0.2, L.z + rZ * s * 0.9 - fZ * 1.4, R() * 2, 0.8, R() * 2, 0.85, 0.85, 0.88, 0.9);
-    if (L.offRoad && Math.random() < 0.8) particles.emit(L.x - fX * 1.4 + R() * 2, L.y + 0.15, L.z - fZ * 1.4 + R() * 2, R() * 3, 1.5, R() * 3, 0.55, 0.42, 0.25, 0.7);
-  }
-  if (L.nitroOn) particles.emit(L.x - fX * 2.8, L.y + 0.5, L.z - fZ * 2.8, -fX * 8 + R() * 2, 0.3, -fZ * 8 + R() * 2, 1, 0.5 + Math.random() * 0.3, 0.1, 0.3);
-  if (L.landBurst > 0) { L.landBurst--; particles.emit(L.x + R() * 2.5, L.y + 0.1, L.z + R() * 2.5, R() * 6, 2 + Math.random() * 2, R() * 6, 0.6, 0.5, 0.35, 0.8); }
+
+    c.x = L.x; c.y = L.y; c.z = L.z; c.a = L.a; c.v = L.speed;
+    c.group.position.set(L.x, L.y, L.z);
+    c.pitch += (L.pitchTarget - c.pitch) * Math.min(1, dt * 6);
+    c.group.rotation.set(c.pitch, L.a, -L.steerVis * 0.06 * Math.min(1, L.speed / 25));
+    animateCar(c, dt, L.fs, L.steerVis, L.nitroOn, input.down && L.fs > 0.5);
+
+    const fX = Math.sin(L.a), fZ = Math.cos(L.a), rX = -fZ, rZ = fX, R = () => Math.random() - 0.5;
+
+    if (!L.airborne && L.speed > 6) {
+        if (L.drifting && L.slip > 0.12) for (const s of [-1, 1]) if (Math.random() < 0.7) particles.emit(L.x + rX * s * 0.9 - fX * 1.4, L.y + 0.2, L.z + rZ * s * 0.9 - fZ * 1.4, R() * 2, 0.8, R() * 2, 0.85, 0.85, 0.88, 0.9);
+        if (L.offRoad && Math.random() < 0.8) particles.emit(L.x - fX * 1.4 + R() * 2, L.y + 0.15, L.z - fZ * 1.4 + R() * 2, R() * 3, 1.5, R() * 3, 0.55, 0.42, 0.25, 0.7);
+    }
+    if (L.nitroOn) particles.emit(L.x - fX * 2.8, L.y + 0.5, L.z - fZ * 2.8, -fX * 8 + R() * 2, 0.3, -fZ * 8 + R() * 2, 1, 0.5 + Math.random() * 0.3, 0.1, 0.3);
+    if (L.landBurst > 0) { L.landBurst--; particles.emit(L.x + R() * 2.5, L.y + 0.1, L.z + R() * 2.5, R() * 6, 2 + Math.random() * 2, R() * 6, 0.6, 0.5, 0.35, 0.8); }
 }
 function updateRemote(dt) {
   const k = 1 - Math.exp(-dt * 12);
@@ -547,7 +571,6 @@ function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     if (!app.track) return;
 
-    // 1. 대기실(로비)이나 결과 화면일 때만 맵 전체를 비추는 로비 카메라 작동
     if (app.phase === 'enter' || app.phase === 'lobby' || app.phase === 'results') {
         lobbyCamera(now / 1000);
         sfx.setEngine(0, false, false); sfx.setSkid(false, 0); sfx.setNitro(false);
@@ -555,7 +578,6 @@ function frame(now) {
         return;
     }
 
-    // 2. 경기가 시작(카운트다운 또는 레이싱 중)되면 내 차를 조작하고 카메라가 쫓아감!
     readInput();
     const control = app.phase === 'racing' && !app.finished;
     if (app.local) {
@@ -570,10 +592,8 @@ function frame(now) {
     updateRemote(dt);
     particles.update(dt);
 
-    // 👇 핵심: 이 함수가 실행되어야 카메라가 내 차 뒤로 찰싹 붙습니다!
     updateCamera(dt);
     updateHud();
-
     renderer.render(scene, camera);
 }
 
