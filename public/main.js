@@ -17,11 +17,11 @@ let myColor = localStorage.getItem('racer_color') || COLORS[0]; // 저장된 색
 const P = {
     maxSpeed: 42, accel: 18, brake: 28, reverseMax: 12, drag: 0.0006, roll: 0.04, engineBrake: 0.12,
     grip: 8, driftGrip: 2.0, steer: 1.7, driftSteer: 1.35,
-    nitroSpeed: 16, nitroAccel: 18, nitroUse: 45, nitroCharge: 15, // 👈 부스터 속도/가속은 더 강력하게, 소모량(nitroUse)은 줄여서 지속 시간 연장!
-    padSpeed: 16, padTime: 2.0, grassMax: 22, grassDrag: 1.5, // 👈 부스트 패드 지속 시간(padTime)도 1.4초에서 2.0초로 상향
+    nitroSpeed: 16, nitroAccel: 18, nitroUse: 45,
+    nitroCharge: 35, // 👈 기존 15에서 35로 상향! 드리프트 시 게이지가 훨씬 빠르고 시원하게 찹니다.
+    padSpeed: 16, padTime: 2.0, grassMax: 22, grassDrag: 1.5,
     gravity: 20, collideR: 2.3,
 };
-const NO_INPUT = { up: false, down: false, left: false, right: false, drift: false, nitro: false };
 
 // ---------- 토스트 ----------
 function toast(msg, ms = 2500) { const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg; $('toasts').appendChild(el); setTimeout(() => el.classList.add('out'), ms); setTimeout(() => el.remove(), ms + 400); }
@@ -527,7 +527,18 @@ function updateCamera(dt) {
   const mode = camModes[app.camMode];
   const velA = L.speed > 3 ? Math.atan2(L.vx, L.vz) : L.a;
   L.camYaw = lerpAngle(L.camYaw, lerpAngle(L.a, velA, L.drifting ? 0.5 : 0.25), 1 - Math.exp(-dt * 5));
-  L.shake = Math.max(0, L.shake - dt * 2.2);
+    // updateCamera 함수 내부의 이 부분을 찾아서 교체해 주세요!
+
+    L.shake = Math.max(0, L.shake - dt * 2.2);
+
+    // 👇 부스터(또는 패드) 사용 중일 때 미세하고 지속적인 화면 진동(Shake) 추가!
+    if (L.nitroOn || L.padBoost > 0) L.shake = Math.max(L.shake, 0.5);
+
+    const sh = L.shake * 0.35, R = () => Math.random() - 0.5;
+
+    // 👇 부스터 켤 때 시야각(FOV)을 확 벌려서 주변이 뒤로 빠르게 지나가는 '터널 효과' 극대화 (10 -> 25)
+    const targetFov = 62 + L.speed * 0.25 + (L.nitroOn ? 25 : 0) + (L.padBoost > 0 ? 18 : 0);
+    camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 4); camera.updateProjectionMatrix();
   const sh = L.shake * 0.35, R = () => Math.random() - 0.5;
   const targetFov = 62 + L.speed * 0.25 + (L.nitroOn ? 10 : 0) + (L.padBoost > 0 ? 6 : 0);
   camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 4); camera.updateProjectionMatrix();
