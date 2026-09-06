@@ -4,7 +4,7 @@ const path = require('path');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 const MAX_PLAYERS = 4;
 const TICK_MS = 66;            // 상태 브로드캐스트 15Hz
 const COUNTDOWN_MS = 3800;     // race_start → go
@@ -286,4 +286,6 @@ const heartbeatInterval = setInterval(() => {
     });
 }, 15000);
 
-server.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server listening on port ${PORT}`);
+});
