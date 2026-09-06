@@ -318,8 +318,8 @@ button {
     inset: 0;
     pointer-events: none;
     font-variant-numeric: tabular-nums;
+    z-index: 5; /* 👈 이 줄을 추가해서 속도계를 맨 앞으로 꺼내주세요! */
 }
-
 #hud-top {
     position: absolute;
     top: 14px;

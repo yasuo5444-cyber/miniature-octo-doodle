@@ -222,16 +222,19 @@ export class Track {
     const beam = new THREE.Mesh(new THREE.BoxGeometry(WO * 2 + 2, 1.4, 0.6), [postM, postM, postM, postM, bannerM, bannerM]);
     beam.position.y = 6.3; arch.add(beam);
     arch.position.set(this.px[ai], this.py[ai], this.pz[ai]); arch.rotation.y = Math.atan2(-this.rz[ai], this.rx[ai]); g.add(arch);
-    // 관중석 (출발선 우측)
-    const gi = 40, gs = new THREE.Group(), off = WO + 0.3 + this.py[gi] * EMB_SLOPE + EMB_BASE + 9;
-    const stand = new THREE.Mesh(new THREE.BoxGeometry(44, 5, 9), new THREE.MeshLambertMaterial({ color: 0x8a8f99 })); stand.position.y = 2.5; gs.add(stand);
-    const crowd = canvasTex(88, 12, (ctx, w, h) => { for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) { ctx.fillStyle = `hsl(${Math.floor(rnd() * 360)},70%,${45 + rnd() * 30}%)`; ctx.fillRect(x, y, 1, 1); } });
-    const seats = new THREE.Mesh(new THREE.BoxGeometry(44, 0.6, 9.2), new THREE.MeshBasicMaterial({ map: crowd })); seats.position.y = 5.3; gs.add(seats);
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(46, 0.4, 10), new THREE.MeshLambertMaterial({ color: 0xdddddd })); roof.position.y = 9.5; gs.add(roof);
-    for (const s of [-1, 1]) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, 0.5), postM); m.position.set(s * 21, 7.5, -4); gs.add(m); }
-    gs.position.set(this.px[gi] + this.rx[gi] * off, 0, this.pz[gi] + this.rz[gi] * off); gs.rotation.y = Math.atan2(-this.rz[gi], this.rx[gi]); g.add(gs);
-    this._decor(g, quality, rnd);
-    return g;
+      // 관중석 (출발선 우측)
+      const gi = 40, gs = new THREE.Group(), off = WO + 0.3 + this.py[gi] * EMB_SLOPE + EMB_BASE + 9;
+      const stand = new THREE.Mesh(new THREE.BoxGeometry(44, 5, 9), new THREE.MeshLambertMaterial({ color: 0x8a8f99 })); stand.position.y = 2.5; gs.add(stand);
+      const crowd = canvasTex(88, 12, (ctx, w, h) => { for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) { ctx.fillStyle = `hsl(${Math.floor(rnd() * 360)},70%,${45 + rnd() * 30}%)`; ctx.fillRect(x, y, 1, 1); } });
+      const seats = new THREE.Mesh(new THREE.BoxGeometry(44, 0.6, 9.2), new THREE.MeshBasicMaterial({ map: crowd })); seats.position.y = 5.3; gs.add(seats);
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(46, 0.4, 10), new THREE.MeshLambertMaterial({ color: 0xdddddd })); roof.position.y = 9.5; gs.add(roof);
+      for (const s of [-1, 1]) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, 0.5), postM); m.position.set(s * 21, 7.5, -4); gs.add(m); }
+
+      // 👇 바로 아랫줄의 뒷부분 Math.atan2 괄호 안의 값이 수정되었습니다!
+      gs.position.set(this.px[gi] + this.rx[gi] * off, 0, this.pz[gi] + this.rz[gi] * off); gs.rotation.y = Math.atan2(-this.rx[gi], -this.rz[gi]); g.add(gs);
+
+      this._decor(g, quality, rnd);
+      return g;
   }
 
   _decor(g, quality, rnd) {
