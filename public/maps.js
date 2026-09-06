@@ -2,8 +2,8 @@
 // jumps: 제어점 pt 위치에서 끝나는 램프(길이 len m, 높이 h m) → 도로가 뚝 떨어져 점프
 // pads: 트랙 진행률(0~1)의 부스트 패드 위치
 // cp: 체크포인트 수 — ⚠ server.js 의 MAP_CP 와 동일해야 함
-// 새 맵 추가: 아래 블록 하나 복사 → MAP_ORDER 와 server.js MAP_CP 에 id 추가
-export const MAP_ORDER = ['sunset', 'harbor', 'mountain', 'canyon', 'random'];
+// 맨 위 MAP_ORDER에 'construction'을 추가합니다.
+export const MAP_ORDER = ['sunset', 'harbor', 'mountain', 'canyon', 'random', 'construction'];
 export const MAPS = {
   sunset: {
     name: '선셋 서킷', icon: '🌇', diff: 1, cp: 12, scale: 1.0,
@@ -36,7 +36,24 @@ export const MAPS = {
     pads: [0.15, 0.33, 0.5, 0.7, 0.9], jumps: [{ pt: 12, len: 50, h: 3.5 }, { pt: 19, len: 55, h: 4 }],
     palette: { sky: 0xffcf9c, fog: 0xf3c99e, ground: 0xc98a55, road: 0x4d4a4a, curbA: 0xd66a2a, curbB: 0xf7e9d2, wall: 0xe0c9a8, emb: 0xa86f3f, light: 0xffe9c8 },
     decor: { mesa: 40, rock: 120, cactus: 60 },
-  },
+    },
+    construction: {
+        name: '익스트림 공사장', icon: '🚧', diff: 5, cp: 18, scale: 0.85,
+        desc: '하드코어 · 35m 급경사 스파이럴 · 아찔한 고저차 (약 1,500m)',
+        // 바깥으로 넓어지며 35m까지 미친듯이 올라갔다가 뚝 떨어지는 궤적
+        pts: [
+            [0, -50, 0], [80, -20, 5], [60, 60, 10], [-40, 90, 15],
+            [-120, 20, 20], [-80, -100, 25], [40, -150, 30], [160, -80, 35],
+            [180, 80, 15], [100, 160, 5], [-50, 150, 0], [-150, 80, 0], [-100, -50, 0]
+        ],
+        pads: [0.2, 0.45, 0.7, 0.9], jumps: [{ pt: 7, len: 60, h: 5 }], // 꼭대기에서 점프!
+        palette: {
+            sky: 0xd98f5e, fog: 0xc48052, ground: 0x5a4a3c, road: 0x3b3f45,
+            curbA: 0xffd23f, curbB: 0x111111, // 공사장 테마: 노랑/검정 연석!
+            wall: 0x8c8c8c, emb: 0x665544, light: 0xffe6cc
+        },
+        decor: { crane: 12, container: 60, building: 15, rock: 30 },
+    },
   random: {
     name: '랜덤 트랙', icon: '🎲', diff: 0, cp: 12, scale: 1.0,
     desc: '시드 기반 무작위 서킷 · 완만한 언덕 · 매번 다른 코스',

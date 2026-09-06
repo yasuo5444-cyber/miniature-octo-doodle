@@ -12,7 +12,7 @@ const DNF_MS = 60000;          // 1등 완주 후 나머지 대기 시간
 const LAP_CHOICES = [1, 2, 3, 5];
 const COLORS = ['#ff4b4b', '#ff8c2a', '#ffd23f', '#4bff8a', '#2ad4b0', '#3fa9ff', '#7d5cff', '#ff5cc8', '#ffffff', '#9aa3ad', '#3b3f45', '#c8a45a'];
 // ⚠ public/maps.js 의 cp 값과 반드시 동일해야 함
-const MAP_CP = { sunset: 12, harbor: 18, mountain: 16, canyon: 20, random: 12 };
+const MAP_CP = { sunset: 12, harbor: 18, mountain: 16, canyon: 20, random: 12, construction: 18 };
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
