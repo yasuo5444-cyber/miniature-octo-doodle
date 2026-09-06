@@ -631,19 +631,26 @@ function frame(now) {
 
 // ---------- 시작 ----------
 try {
-    if (!renderer.capabilities.isWebGL2 && !renderer.getContext()) {
-        throw new Error("WebGL 지원 불가");
-    }
     loadTrack('sunset', 1);
+} catch (e) {
+    console.error("loadTrack error:", e);
+    toast("트랙 로드 오류: " + e.message, 10000);
+}
+
+try {
     net.connect();
+} catch (e) {
+    console.error("net.connect error:", e);
+    toast("네트워크 연결 오류: " + e.message, 10000);
+}
 
-    // 오디오 컨텍스트 재개 안전장치
-    document.addEventListener('pointerdown', () => {
-        try { sfx.resume(); } catch (e) { }
-    }, { once: true });
+document.addEventListener('pointerdown', () => {
+    try { sfx.resume(); } catch (e) { }
+});
 
+try {
     requestAnimationFrame(frame);
 } catch (e) {
-    console.error("Game initialization failed:", e);
-    toast("게임 초기화 중 오류가 발생했습니다. 새로고침 해주세요.", 5000);
+    console.error("frame loop error:", e);
+    toast("렌더링 루프 오류: " + e.message, 10000);
 }
