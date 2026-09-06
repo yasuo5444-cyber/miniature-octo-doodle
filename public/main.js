@@ -498,7 +498,19 @@ function updateLocalVisual(dt) {
         if (L.drifting && L.slip > 0.12) for (const s of [-1, 1]) if (Math.random() < 0.7) particles.emit(L.x + rX * s * 0.9 - fX * 1.4, L.y + 0.2, L.z + rZ * s * 0.9 - fZ * 1.4, R() * 2, 0.8, R() * 2, 0.85, 0.85, 0.88, 0.9);
         if (L.offRoad && Math.random() < 0.8) particles.emit(L.x - fX * 1.4 + R() * 2, L.y + 0.15, L.z - fZ * 1.4 + R() * 2, R() * 3, 1.5, R() * 3, 0.55, 0.42, 0.25, 0.7);
     }
-    if (L.nitroOn) particles.emit(L.x - fX * 2.8, L.y + 0.5, L.z - fZ * 2.8, -fX * 8 + R() * 2, 0.3, -fZ * 8 + R() * 2, 1, 0.5 + Math.random() * 0.3, 0.1, 0.3);
+
+    // 👇 강화된 부스터 불꽃 이펙트 적용 완료!
+    if (L.nitroOn) {
+        for (let i = 0; i < 3; i++) {
+            particles.emit(
+                L.x - fX * 2.8 + R(), L.y + 0.4 + R(), L.z - fZ * 2.8 + R(),
+                -fX * 15 + R() * 4, R() * 2, -fZ * 15 + R() * 4,
+                1.0, 0.6 + Math.random() * 0.4, 0.1,
+                0.3 + Math.random() * 0.3
+            );
+        }
+    }
+
     if (L.landBurst > 0) { L.landBurst--; particles.emit(L.x + R() * 2.5, L.y + 0.1, L.z + R() * 2.5, R() * 6, 2 + Math.random() * 2, R() * 6, 0.6, 0.5, 0.35, 0.8); }
 }
 function updateRemote(dt) {
@@ -523,40 +535,37 @@ function updateRemote(dt) {
 const camModes = [{ d: 9.5, h: 3.8, look: 5, lh: 1.2 }, { d: 15, h: 6.5, look: 8, lh: 1.5 }, null];
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(); let camInit = false;
 function updateCamera(dt) {
-  const L = app.local; if (!L) return;
-  const mode = camModes[app.camMode];
-  const velA = L.speed > 3 ? Math.atan2(L.vx, L.vz) : L.a;
-  L.camYaw = lerpAngle(L.camYaw, lerpAngle(L.a, velA, L.drifting ? 0.5 : 0.25), 1 - Math.exp(-dt * 5));
-    // updateCamera 함수 내부의 이 부분을 찾아서 교체해 주세요!
-
+    const L = app.local; if (!L) return;
+    const mode = camModes[app.camMode];
+    const velA = L.speed > 3 ? Math.atan2(L.vx, L.vz) : L.a;
+    L.camYaw = lerpAngle(L.camYaw, lerpAngle(L.a, velA, L.drifting ? 0.5 : 0.25), 1 - Math.exp(-dt * 5));
     L.shake = Math.max(0, L.shake - dt * 2.2);
 
-    // 👇 부스터(또는 패드) 사용 중일 때 미세하고 지속적인 화면 진동(Shake) 추가!
+    // 👇 부스터/패드 사용 시 화면 진동 추가!
     if (L.nitroOn || L.padBoost > 0) L.shake = Math.max(L.shake, 0.5);
 
     const sh = L.shake * 0.35, R = () => Math.random() - 0.5;
 
-    // 👇 부스터 켤 때 시야각(FOV)을 확 벌려서 주변이 뒤로 빠르게 지나가는 '터널 효과' 극대화 (10 -> 25)
+    // 👇 부스터 켤 때 시야각(FOV) 연출 강화 적용!
     const targetFov = 62 + L.speed * 0.25 + (L.nitroOn ? 25 : 0) + (L.padBoost > 0 ? 18 : 0);
-    camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 4); camera.updateProjectionMatrix();
-  const sh = L.shake * 0.35, R = () => Math.random() - 0.5;
-  const targetFov = 62 + L.speed * 0.25 + (L.nitroOn ? 10 : 0) + (L.padBoost > 0 ? 6 : 0);
-  camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 4); camera.updateProjectionMatrix();
-  if (!mode) {   // 후드 카메라
-    camera.position.set(L.x + Math.sin(L.a) * 1.0, L.y + 1.25, L.z + Math.cos(L.a) * 1.0);
-    camera.lookAt(L.x + Math.sin(L.a) * 30, L.y + 1.0 - Math.tan(L.pitchTarget) * 18, L.z + Math.cos(L.a) * 30);
-    return;
-  }
-  const fX = Math.sin(L.camYaw), fZ = Math.cos(L.camYaw);
-  const dx = L.x - fX * mode.d, dz = L.z - fZ * mode.d;
-  let dy = L.y + mode.h;
-  const gyc = app.track.heightAt(dx, dz, L.hint) + 1.3; if (dy < gyc) dy = gyc;   // 언덕 뒤에서 카메라가 땅에 묻히지 않게
-  if (!camInit) { camPos.set(dx, dy, dz); camInit = true; }
-  const k = 1 - Math.exp(-dt * 7);
-  camPos.x += (dx - camPos.x) * k; camPos.z += (dz - camPos.z) * k; camPos.y += (dy - camPos.y) * Math.min(1, dt * 9);
-  camera.position.set(camPos.x + R() * sh, camPos.y + R() * sh, camPos.z + R() * sh);
-  camLook.set(L.x + Math.sin(L.a) * mode.look, L.y + mode.lh, L.z + Math.cos(L.a) * mode.look);
-  camera.lookAt(camLook);
+    camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 4);
+    camera.updateProjectionMatrix();
+
+    if (!mode) {   // 후드 카메라
+        camera.position.set(L.x + Math.sin(L.a) * 1.0, L.y + 1.25, L.z + Math.cos(L.a) * 1.0);
+        camera.lookAt(L.x + Math.sin(L.a) * 30, L.y + 1.0 - Math.tan(L.pitchTarget) * 18, L.z + Math.cos(L.a) * 30);
+        return;
+    }
+    const fX = Math.sin(L.camYaw), fZ = Math.cos(L.camYaw);
+    const dx = L.x - fX * mode.d, dz = L.z - fZ * mode.d;
+    let dy = L.y + mode.h;
+    const gyc = app.track.heightAt(dx, dz, L.hint) + 1.3; if (dy < gyc) dy = gyc;   // 언덕 뒤에서 카메라가 땅에 묻히지 않게
+    if (!camInit) { camPos.set(dx, dy, dz); camInit = true; }
+    const k = 1 - Math.exp(-dt * 7);
+    camPos.x += (dx - camPos.x) * k; camPos.z += (dz - camPos.z) * k; camPos.y += (dy - camPos.y) * Math.min(1, dt * 9);
+    camera.position.set(camPos.x + R() * sh, camPos.y + R() * sh, camPos.z + R() * sh);
+    camLook.set(L.x + Math.sin(L.a) * mode.look, L.y + mode.lh, L.z + Math.cos(L.a) * mode.look);
+    camera.lookAt(camLook);
 }
 function lobbyCamera(t) {
   const T = app.track, b = T.bounds, r = Math.max(b.w, b.h) * 0.62 + 90;
