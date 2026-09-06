@@ -630,7 +630,20 @@ function frame(now) {
 }
 
 // ---------- 시작 ----------
-loadTrack('sunset', 1);
-net.connect();
-document.addEventListener('pointerdown', () => sfx.resume());
-requestAnimationFrame(frame);
+try {
+    if (!renderer.capabilities.isWebGL2 && !renderer.getContext()) {
+        throw new Error("WebGL 지원 불가");
+    }
+    loadTrack('sunset', 1);
+    net.connect();
+
+    // 오디오 컨텍스트 재개 안전장치
+    document.addEventListener('pointerdown', () => {
+        try { sfx.resume(); } catch (e) { }
+    }, { once: true });
+
+    requestAnimationFrame(frame);
+} catch (e) {
+    console.error("Game initialization failed:", e);
+    toast("게임 초기화 중 오류가 발생했습니다. 새로고침 해주세요.", 5000);
+}
