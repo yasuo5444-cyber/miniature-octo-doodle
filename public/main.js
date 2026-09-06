@@ -53,7 +53,14 @@ const camera = new THREE.PerspectiveCamera(65, 1, 0.5, 2500);
 const hemi = new THREE.HemisphereLight(0xffffff, 0x556644, 0.85); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.0); sun.position.set(150, 220, 90); scene.add(sun);
 let trackGroup = null;
-function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+function resize() {
+    const w = window.innerWidth || document.documentElement.clientWidth || 800;
+    const h = window.innerHeight || document.documentElement.clientHeight || 600;
+    if (h === 0) return; // 0으로 나누기(NaN) 치명적 오류 방지
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+}
 addEventListener('resize', resize); resize();
 
 class Particles {
@@ -309,6 +316,7 @@ function spawnCar(p) {
     }
 }
 // ---------- 입력 ----------
+const NO_INPUT = { up: false, down: false, left: false, right: false, drift: false, nitro: false }; // 👈 이 줄을 반드시 추가해 주세요!
 const keys = {}, touch = { up: 0, down: 0, left: 0, right: 0, drift: 0, nitro: 0 };
 const input = { ...NO_INPUT };
 addEventListener('keydown', e => {
@@ -596,61 +604,60 @@ function sendState() {
   net.send('state', { x: L.x, y: L.y, z: L.z, a: L.a, v: L.speed, f, t: L.n ? L.n.t : 0 });
 }
 
-// ---------- 메인 루프 ----------
+// ---------- 에러 추적 및 메인 루프 ----------
+window.addEventListener('error', function (e) {
+    alert("🚨 시스템 에러 발생!\n" + e.message + "\n위치: " + e.lineno + "번째 줄");
+});
+
 let last = performance.now(), sendAcc = 0, hudAcc = 0;
 function frame(now) {
-    requestAnimationFrame(frame);
-    const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    if (!app.track) return;
+    try {
+        requestAnimationFrame(frame);
+        const dt = Math.min(0.05, (now - last) / 1000); last = now;
+        if (!app.track) return;
 
-    if (app.phase === 'enter' || app.phase === 'lobby' || app.phase === 'results') {
-        lobbyCamera(now / 1000);
-        sfx.setEngine(0, false, false); sfx.setSkid(false, 0); sfx.setNitro(false);
+        if (app.phase === 'enter' || app.phase === 'lobby' || app.phase === 'results') {
+            lobbyCamera(now / 1000);
+            sfx.setEngine(0, false, false); sfx.setSkid(false, 0); sfx.setNitro(false);
+            renderer.render(scene, camera);
+            return;
+        }
+
+        readInput();
+        const control = app.phase === 'racing' && !app.finished;
+        if (app.local) {
+            const steps = Math.max(1, Math.min(6, Math.ceil(dt / (1 / 120)))), h = dt / steps;
+            for (let i = 0; i < steps; i++) stepLocal(h, control);
+            updateLocalVisual(dt);
+            sendAcc += dt; if (sendAcc >= 1 / 15 && app.phase !== 'results') { sendAcc = 0; sendState(); }
+            sfx.setEngine(app.local.speed, control && input.up, app.local.nitroOn);
+            sfx.setSkid(app.local.drifting && app.local.slip > 0.1, app.local.slip);
+            sfx.setNitro(app.local.nitroOn);
+        }
+        updateRemote(dt);
+        particles.update(dt);
+
+        updateCamera(dt);
+        updateHud();
         renderer.render(scene, camera);
-        return;
+    } catch (err) {
+        if (!window._frameErrAlerted) {
+            window._frameErrAlerted = true;
+            alert("🚨 렌더링 루프 에러!\n내용: " + err.message);
+        }
     }
-
-    readInput();
-    const control = app.phase === 'racing' && !app.finished;
-    if (app.local) {
-        const steps = Math.max(1, Math.min(6, Math.ceil(dt / (1 / 120)))), h = dt / steps;
-        for (let i = 0; i < steps; i++) stepLocal(h, control);
-        updateLocalVisual(dt);
-        sendAcc += dt; if (sendAcc >= 1 / 15 && app.phase !== 'results') { sendAcc = 0; sendState(); }
-        sfx.setEngine(app.local.speed, control && input.up, app.local.nitroOn);
-        sfx.setSkid(app.local.drifting && app.local.slip > 0.1, app.local.slip);
-        sfx.setNitro(app.local.nitroOn);
-    }
-    updateRemote(dt);
-    particles.update(dt);
-
-    updateCamera(dt);
-    updateHud();
-    renderer.render(scene, camera);
 }
 
 // ---------- 시작 ----------
 try {
+    if (!renderer || !renderer.getContext()) {
+        alert("🚨 이 브라우저에서 WebGL(3D 그래픽)을 지원하지 않거나 차단되었습니다.");
+    }
+
     loadTrack('sunset', 1);
-} catch (e) {
-    console.error("loadTrack error:", e);
-    toast("트랙 로드 오류: " + e.message, 10000);
-}
-
-try {
     net.connect();
-} catch (e) {
-    console.error("net.connect error:", e);
-    toast("네트워크 연결 오류: " + e.message, 10000);
-}
-
-document.addEventListener('pointerdown', () => {
-    try { sfx.resume(); } catch (e) { }
-});
-
-try {
+    document.addEventListener('pointerdown', () => { try { sfx.resume(); } catch (e) { } });
     requestAnimationFrame(frame);
-} catch (e) {
-    console.error("frame loop error:", e);
-    toast("렌더링 루프 오류: " + e.message, 10000);
+} catch (err) {
+    alert("🚨 초기 로딩 에러!\n내용: " + err.message);
 }
