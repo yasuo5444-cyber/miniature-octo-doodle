@@ -111,23 +111,27 @@ function drawMinimap() {
 
 // ---------- 로비 UI ----------
 const nameInput = $('name'), codeInput = $('code');
-// --- 메인 화면 색상 팔레트 생성 ---
-const preCp = $('pre-color-picker');
-if (preCp) {
-    COLORS.forEach(c => {
-        const btn = document.createElement('div');
-        btn.className = 'color-btn';
-        btn.style.backgroundColor = c;
-        if (c === myColor) btn.classList.add('sel'); // 내가 고른 색상 테두리 표시
+// --- 메인 화면 색상 팔레트 생성 (안전 장치 추가) ---
+try {
+    const preCp = $('pre-color-picker');
+    if (preCp) {
+        COLORS.forEach(c => {
+            const btn = document.createElement('div');
+            btn.className = 'color-btn';
+            btn.style.backgroundColor = c;
+            if (c === myColor) btn.classList.add('sel');
 
-        btn.onclick = () => {
-            myColor = c;
-            localStorage.setItem('racer_color', c); // 다음 접속 때도 유지되게 저장
-            Array.from(preCp.children).forEach(b => b.classList.remove('sel')); // 다른 테두리 끄기
-            btn.classList.add('sel'); // 클릭한 것에 테두리 켜기
-        };
-        preCp.appendChild(btn);
-    });
+            btn.onclick = () => {
+                myColor = c;
+                localStorage.setItem('racer_color', c);
+                Array.from(preCp.children).forEach(b => b.classList.remove('sel'));
+                btn.classList.add('sel');
+            };
+            preCp.appendChild(btn);
+        });
+    }
+} catch (err) {
+    console.error("Color picker init error:", err);
 }
 // ---------------------------------
 nameInput.value = localStorage.getItem('racer_name') || '';
